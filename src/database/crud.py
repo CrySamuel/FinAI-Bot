@@ -3,6 +3,9 @@ from sqlalchemy import func, extract
 from datetime import datetime
 from src.database.models import Transacao, Renda
 
+import pandas as pd
+import os
+
 def criar_transacao(db: Session, valor: float, categoria: str, descricao: str):
     """Salva um novo gasto no banco de dados"""
     nova_transacao = Transacao(
@@ -56,3 +59,26 @@ def obter_resumo_mes(db: Session):
         "despesas": total_gasto,
         "saldo": saldo
     }
+
+def gerar_relatorio_excel(db: Session, caminho_arquivo: str = "relatorio_mensal.xlsx"):
+    gastos = db.query(Transacao).all()
+    
+    if not gastos:
+        return False 
+        
+    dados = []
+    for g in gastos:
+        dados.append({
+            "ID": g.id,
+            "Data": g.data.strftime("%d/%m/%Y"),
+            "Hora": g.data.strftime("%H:%M"),
+            "Categoria": g.categoria,
+            "Descrição": g.descricao,
+            "Valor (R$)": round(g.valor, 2)
+        })
+        
+    df = pd.DataFrame(dados)
+    
+    df.to_excel(caminho_arquivo, index=False, engine='openpyxl')
+    
+    return True
