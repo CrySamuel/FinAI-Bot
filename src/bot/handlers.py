@@ -9,7 +9,8 @@ from src.ai.processor import analisar_mensagem_com_ia
 from src.database.database import SessionLocal
 from src.database.crud import (
     criar_transacao, criar_renda, obter_resumo_mes, gerar_relatorio_excel,
-    listar_ultimas_transacoes, apagar_transacao, listar_transacoes
+    listar_ultimas_transacoes, apagar_transacao, listar_transacoes,
+    obter_analise_categorias, filtrar_gastos_por_termo
 )
 
 from datetime import datetime
@@ -36,6 +37,8 @@ async def comando_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🕒 */ultimos* - Mostra os 5 últimos gastos registrados.\n"
         "🗑️ */apagar [ID]* - Apaga um gasto incorreto usando o ID.\n"
         "💰 */transacoes* - Lista todos os gastos registrados.\n"
+        "🍕 */analise* - Mostra a % de gastos por categoria.\n"
+        "🔍 */filtro [termo]* - Mostra o total gasto em um local ou categoria específica.\n"
     )
     await update.message.reply_text(mensagem, parse_mode='Markdown')
 
@@ -271,6 +274,59 @@ async def comando_apagar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("⚠️ O ID precisa ser um número. Exemplo: /apagar 3")
 
+async def comando_analise(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = SessionLocal()
+    categorias = obter_analise_categorias(db)
+    resumo = obter_resumo_mes(db)
+    db.close()
+    
+    total_gasto = resumo["despesas"]
+    
+    if total_gasto == 0 or not categorias:
+        await update.message.reply_text("📉 Nenhum gasto registrado para analisar.")
+        return
+        
+    mensagem = "📊 *Análise de Gastos (Porcentagem)* 📊\n\n"
+    
+    # Ordena a lista do maior gasto para o menor
+    categorias_ordenadas = sorted(categorias, key=lambda x: x['total'], reverse=True)
+    
+    for cat in categorias_ordenadas:
+        porcentagem = (cat['total'] / total_gasto) * 100
+        valor_fmt = f"{cat['total']:.2f}".replace('.', ',')
+        mensagem += f"🔸 *{cat['categoria']}*: {porcentagem:.1f}% (R$ {valor_fmt})\n"
+        
+    await update.message.reply_text(mensagem, parse_mode='Markdown')
+
+async def comando_filtro(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Busca gastos por palavra-chave e exibe o detalhamento"""
+    if not context.args:
+        await update.message.reply_text("⚠️ Me diga o que quer buscar. Exemplo: /filtro mercado")
+        return
+        
+    termo = " ".join(context.args)
+    
+    db = SessionLocal()
+    total, transacoes = filtrar_gastos_por_termo(db, termo)
+    db.close()
+    
+    if total > 0:
+        total_fmt = f"{total:.2f}".replace('.', ',')
+        
+        mensagem = f"🔍 *Resultado da busca para '{termo}':*\n\n"
+        mensagem += f"💰 *Total Gasto:* R$ {total_fmt}\n"
+        mensagem += "-------------------------\n📝 *Detalhes:*\n\n"
+        
+        for t in transacoes:
+            data_fmt = t.data.strftime("%d/%m")
+            valor_fmt = f"{t.valor:.2f}".replace('.', ',')
+            
+            mensagem += f"🔸 {data_fmt} - {t.categoria} ({t.descricao}): R$ {valor_fmt}\n"
+            
+        await update.message.reply_text(mensagem, parse_mode='Markdown')
+    else:
+        await update.message.reply_text(f"🔍 Nenhum gasto encontrado com a palavra '{termo}'.")
+        
 def setup_handlers(app):
     app.add_handler(CommandHandler("start", comando_start))
     app.add_handler(CommandHandler("comandos", comando_comandos))
@@ -279,6 +335,8 @@ def setup_handlers(app):
     app.add_handler(CommandHandler("ultimos", comando_ultimos))
     app.add_handler(CommandHandler("transacoes", comando_transacoe))
     app.add_handler(CommandHandler("apagar", comando_apagar))
+    app.add_handler(CommandHandler("analise", comando_analise))
+    app.add_handler(CommandHandler("filtro", comando_filtro))
     
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('renda', comando_renda)],

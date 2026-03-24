@@ -94,3 +94,24 @@ def apagar_transacao(db: Session, transacao_id: int):
         db.commit()
         return True
     return False
+
+def obter_analise_categorias(db: Session):
+    """Agrupa os gastos por categoria e retorna a soma de cada uma"""
+    resultados = db.query(
+        Transacao.categoria, 
+        func.sum(Transacao.valor).label('total')
+    ).group_by(Transacao.categoria).all()
+    
+    return [{"categoria": r[0], "total": r[1]} for r in resultados]
+
+def filtrar_gastos_por_termo(db: Session, termo: str):
+    """Busca os gastos por palavra-chave e retorna o total e a lista detalhada"""
+    termo_busca = f"%{termo}%"
+    
+    transacoes = db.query(Transacao).filter(
+        Transacao.categoria.ilike(termo_busca) | Transacao.descricao.ilike(termo_busca)
+    ).order_by(Transacao.data.desc()).all()
+    
+    total = sum(t.valor for t in transacoes)
+    
+    return total, transacoes
