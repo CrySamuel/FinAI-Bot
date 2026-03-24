@@ -1,0 +1,1 @@
+# FinAI-Bot---Gestor-Financeiro-Inteligente
