@@ -82,3 +82,15 @@ def gerar_relatorio_excel(db: Session, caminho_arquivo: str = "relatorio_mensal.
     df.to_excel(caminho_arquivo, index=False, engine='openpyxl')
     
     return True
+
+def listar_ultimas_transacoes(db: Session, limite: int = 5):
+    return db.query(Transacao).order_by(Transacao.data.desc()).limit(limite).all()
+
+def apagar_transacao(db: Session, transacao_id: int):
+    transacao = db.query(Transacao).filter(Transacao.id == transacao_id).first()
+    
+    if transacao:
+        db.delete(transacao)
+        db.commit()
+        return True
+    return False
