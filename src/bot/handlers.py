@@ -6,7 +6,7 @@ from telegram.ext import (
 
 from src.ai.processor import analisar_mensagem_com_ia
 from src.database.database import SessionLocal
-from src.database.crud import criar_transacao, criar_renda
+from src.database.crud import criar_transacao, criar_renda, obter_resumo_mes
 
 ESCOLHER_TIPO, DIGITAR_VALOR, DIGITAR_DIA = range(3)
 
@@ -15,7 +15,8 @@ async def comando_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Olá! Eu sou o seu Gestor Financeiro com IA. 📊\n\n"
         "Comandos disponíveis:\n"
-        "/renda - Cadastrar seu salário ou benefícios\n\n"
+        "/renda - Cadastrar seu salário ou benefícios\n"
+        "/saldo - Ver resumo financeiro do mês\n\n"
         "Para gastos, é só me mandar mensagem normalmente (ex: 'Gastei 50 no mercado')."
     )
 
@@ -119,9 +120,34 @@ async def cancelar_conversa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Cadastro cancelado.")
     return ConversationHandler.END
 
+async def comando_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = SessionLocal()
+    resumo = obter_resumo_mes(db)
+    db.close()
+
+    receitas = resumo["receitas"]
+    despesas = resumo["despesas"]
+    saldo = resumo["saldo"]
+
+    mensagem = (
+        "📊 *Resumo Financeiro do Mês* 📊\n\n"
+        f"📈 *Total Recebido:* R$ {receitas:.2f}\n"
+        f"📉 *Total Gasto:* R$ {despesas:.2f}\n"
+        "-------------------------\n"
+    )
+
+    if saldo > 0:
+        mensagem += f"✅ *Saldo Positivo:* R$ {saldo:.2f}\n\nExcelente! O desafio de 2026 segue firme e forte!"
+    elif saldo == 0:
+        mensagem += f"⚖️ *Saldo Zerado:* R$ 0.00\n\nFique de olho nos próximos gastos."
+    else:
+        mensagem += f"🚨 *Saldo Negativo:* R$ {saldo:.2f}\n\nSinal vermelho! Hora de segurar as despesas."
+
+    await update.message.reply_text(mensagem, parse_mode='Markdown')
 
 def setup_handlers(app):
     app.add_handler(CommandHandler("start", comando_start))
+    app.add_handler(CommandHandler("saldo", comando_saldo))
     
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('renda', comando_renda)],
@@ -136,3 +162,4 @@ def setup_handlers(app):
     app.add_handler(conv_handler)
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, processar_mensagem))
+
