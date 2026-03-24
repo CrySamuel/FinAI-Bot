@@ -11,4 +11,13 @@ class Transacao(Base):
     descricao = Column(String, nullable=False)             
     data = Column(DateTime, default=datetime.utcnow)
 
+class Renda(Base):
+    __tablename__ = 'rendas'
+
+    id = Column(Integer, primary_key=True, index=True)
+    descricao = Column(String, nullable=False)
+    valor = Column(Float, nullable=False)
+    dia_recebimento = Column(Integer, nullable=True)  
+    tipo = Column(String, default="dinheiro")        
+
 Base.metadata.create_all(bind=engine)
