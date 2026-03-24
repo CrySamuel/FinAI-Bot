@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 from telegram.ext import ApplicationBuilder
 from src.bot.handlers import setup_handlers
+from keep_alive import keep_alive
 
 load_dotenv()
 
@@ -12,11 +13,12 @@ def main():
         print("Erro: Token do Telegram não encontrado. Verifique seu arquivo .env!")
         return
 
-    print("Iniciando o FinAI Bot...")
+    print("Ligando o site fantasma para o Render...")
+    keep_alive()
     
+    print("Iniciando o FinAI Bot...")
     app = ApplicationBuilder().token(token).build()
 
-    # Chama a função que registra os comandos (importada da nossa pasta src/bot)
     setup_handlers(app)
 
     print("Bot rodando com sucesso! Mande um /start lá no Telegram.")
