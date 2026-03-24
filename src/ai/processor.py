@@ -1,14 +1,27 @@
+import os
 import requests
 import json
+from dotenv import load_dotenv
+
+# Garante que as variáveis do .env estão carregadas
+load_dotenv()
 
 def analisar_mensagem_com_ia(texto_usuario: str) -> dict:
+    """
+    Envia a mensagem para a API ultra-rápida do Groq (usando Llama 3) 
+    e retorna os dados financeiros.
+    """
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        print("Erro: GROQ_API_KEY não encontrada no arquivo .env!")
+        return None
 
     prompt_sistema = f"""
     Você é um sistema rigoroso de extração de dados financeiros. 
     Leia a mensagem: "{texto_usuario}"
     
     Regras OBRIGATÓRIAS:
-    1. Responda EXCLUSIVAMENTE com um JSON válido.
+    1. Responda EXCLUSIVAMENTE com um JSON válido. Não adicione nenhum texto antes ou depois.
     2. Use as chaves: "valor" (float, use PONTO para os decimais, ex: 15.50), "categoria", "descricao", e "tipo".
     3. A chave "tipo" deve ser estritamente "entrada" (dinheiro ganho/recebido) ou "saida" (dinheiro gasto/pago).
     
@@ -16,28 +29,45 @@ def analisar_mensagem_com_ia(texto_usuario: str) -> dict:
     - "Paguei 45,90 na farmácia" -> {{"valor": 45.90, "categoria": "Saúde", "descricao": "Farmácia", "tipo": "saida"}}
     - "Gastei 120 de gasolina" -> {{"valor": 120.00, "categoria": "Transporte", "descricao": "Gasolina", "tipo": "saida"}}
     - "Ganhei 100 reais de um freela" -> {{"valor": 100.00, "categoria": "Renda Extra", "descricao": "Freela", "tipo": "entrada"}}
-    - "Me pagaram 50,50 que tavam devendo" -> {{"valor": 50.50, "categoria": "Renda Extra", "descricao": "Pagamento divida", "tipo": "entrada"}}
     
-    Agora, processe a mensagem do usuário usando a mesma lógica dos exemplos acima.
+    Gere apenas o JSON e nada mais:
     """
 
-    url = "http://localhost:11434/api/generate"
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
     payload = {
-        "model": "llama3", 
-        "prompt": prompt_sistema,
-        "stream": False,
-        "format": "json" 
+        "model": "llama-3.1-8b-instant",
+        "messages": [
+            {"role": "system", "content": prompt_sistema},
+            {"role": "user", "content": texto_usuario}
+        ],
+        "temperature": 0.0
     }
 
     try:
-        resposta = requests.post(url, json=payload)
+        resposta = requests.post(url, headers=headers, json=payload)
         resposta.raise_for_status()
         
-        dados_gerados = resposta.json()["response"]
-        dados_estruturados = json.loads(dados_gerados)
+        dados_gerados = resposta.json()["choices"][0]["message"]["content"]
         
+        dados_gerados = dados_gerados.strip()
+        if dados_gerados.startswith("```json"):
+            dados_gerados = dados_gerados.replace("```json", "").replace("```", "").strip()
+        elif dados_gerados.startswith("```"):
+            dados_gerados = dados_gerados.replace("```", "").strip()
+            
+        dados_estruturados = json.loads(dados_gerados)
         return dados_estruturados
         
+    except requests.exceptions.HTTPError as e:
+        # Agora, se der erro, o terminal vai imprimir exatamente o que a Groq reclamou
+        print(f"Erro da API Groq (HTTP {e.response.status_code}): {e.response.text}")
+        return None
     except Exception as e:
-        print(f"Erro ao processar com a IA: {e}")
+        print(f"Erro interno ao processar IA: {e}")
         return None
