@@ -4,9 +4,10 @@ from telegram.ext import (
     ConversationHandler, CallbackQueryHandler
 )
 
+import os
 from src.ai.processor import analisar_mensagem_com_ia
 from src.database.database import SessionLocal
-from src.database.crud import criar_transacao, criar_renda, obter_resumo_mes
+from src.database.crud import criar_transacao, criar_renda, obter_resumo_mes, gerar_relatorio_excel
 
 ESCOLHER_TIPO, DIGITAR_VALOR, DIGITAR_DIA = range(3)
 
@@ -14,11 +15,21 @@ ESCOLHER_TIPO, DIGITAR_VALOR, DIGITAR_DIA = range(3)
 async def comando_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Olá! Eu sou o seu Gestor Financeiro com IA. 📊\n\n"
-        "Comandos disponíveis:\n"
-        "/renda - Cadastrar seu salário ou benefícios\n"
-        "/saldo - Ver resumo financeiro do mês\n\n"
-        "Para gastos, é só me mandar mensagem normalmente (ex: 'Gastei 50 no mercado')."
+        "Para registrar um gasto, basta me mandar uma mensagem normal (ex: 'Gastei 50 no mercado').\n\n"
+        "Para ver tudo o que eu posso fazer, digite /comandos"
     )
+
+async def comando_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lista todas as funcionalidades do bot"""
+    mensagem = (
+        "🛠️ *Comandos Disponíveis:*\n\n"
+        "🗣️ *Texto Livre:* Apenas digite seu gasto (ex: 'Paguei 20 no ifood') para a IA registrar.\n\n"
+        "💵 */renda* - Cadastra seu salário, adiantamento ou benefícios.\n"
+        "⚖️ */saldo* - Mostra o balanço do mês atual (Receitas vs Despesas).\n"
+        "📊 */relatorio* - Gera uma planilha Excel detalhada com todo o histórico.\n"
+        "❓ */comandos* - Mostra esta lista de ajuda."
+    )
+    await update.message.reply_text(mensagem, parse_mode='Markdown')
 
 async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto_recebido = update.message.text
@@ -145,9 +156,32 @@ async def comando_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(mensagem, parse_mode='Markdown')
 
+async def comando_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    mensagem_espera = await update.message.reply_text("Gerando sua planilha de fechamento... 📊 Aguarde um instante.")
+    
+    db = SessionLocal()
+    nome_arquivo = "Fechamento_FinAI.xlsx"
+    sucesso = gerar_relatorio_excel(db, nome_arquivo)
+    db.close()
+    
+    if sucesso and os.path.exists(nome_arquivo):
+        with open(nome_arquivo, 'rb') as documento:
+            await update.message.reply_document(
+                document=documento,
+                filename="Fechamento_Mensal.xlsx",
+                caption="Aqui está o seu relatório detalhado de gastos! 📁\nPronto para análise no Excel ou Google Sheets."
+            )
+        
+        os.remove(nome_arquivo)
+        await mensagem_espera.delete() 
+    else:
+        await mensagem_espera.edit_text("❌ Não encontrei nenhum gasto registrado para gerar o relatório.")
+
 def setup_handlers(app):
     app.add_handler(CommandHandler("start", comando_start))
+    app.add_handler(CommandHandler("comandos", comando_comandos))
     app.add_handler(CommandHandler("saldo", comando_saldo))
+    app.add_handler(CommandHandler("relatorio", comando_relatorio))
     
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('renda', comando_renda)],
