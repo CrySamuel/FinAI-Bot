@@ -1,4 +1,6 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import func, extract
+from datetime import datetime
 from src.database.models import Transacao, Renda
 
 def criar_transacao(db: Session, valor: float, categoria: str, descricao: str):
@@ -34,3 +36,23 @@ def criar_renda(db: Session, descricao: str, valor: float, dia_recebimento: int,
 
 def listar_rendas(db: Session):
     return db.query(Renda).all()
+
+def obter_resumo_mes(db: Session):
+    mes_atual = datetime.utcnow().month
+    ano_atual = datetime.utcnow().year
+
+
+    total_renda = db.query(func.sum(Renda.valor)).scalar() or 0.0
+
+    total_gasto = db.query(func.sum(Transacao.valor)).filter(
+        extract('month', Transacao.data) == mes_atual,
+        extract('year', Transacao.data) == ano_atual
+    ).scalar() or 0.0
+
+    saldo = total_renda - total_gasto
+
+    return {
+        "receitas": total_renda,
+        "despesas": total_gasto,
+        "saldo": saldo
+    }
