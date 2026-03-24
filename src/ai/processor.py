@@ -9,15 +9,14 @@ def analisar_mensagem_com_ia(texto_usuario: str) -> dict:
     
     Regras OBRIGATÓRIAS:
     1. Responda EXCLUSIVAMENTE com um JSON válido.
-    2. Use as chaves: "valor" (float com ponto), "categoria" (string), "descricao" (string curta de até 3 palavras).
-    3. Categorias permitidas: Alimentação, Transporte, Lazer, Contas, Saúde, Outros.
+    2. Use as chaves: "valor" (float, use PONTO para os decimais, ex: 15.50), "categoria", "descricao", e "tipo".
+    3. A chave "tipo" deve ser estritamente "entrada" (dinheiro ganho/recebido) ou "saida" (dinheiro gasto/pago).
     
-    EXEMPLOS DE CLASSIFICAÇÃO PARA VOCÊ SEGUIR:
-    - "Paguei 45 na farmácia" -> {{"valor": 45.0, "categoria": "Saúde", "descricao": "Farmácia"}}
-    - "Gastei 120 de gasolina" -> {{"valor": 120.0, "categoria": "Transporte", "descricao": "Gasolina"}}
-    - "Mercado superpão deu 300" -> {{"valor": 300.0, "categoria": "Alimentação", "descricao": "Mercado Superpão"}}
-    - "Conta de luz 150" -> {{"valor": 150.0, "categoria": "Contas", "descricao": "Conta de luz"}}
-    - "Cinema 50 reais" -> {{"valor": 50.0, "categoria": "Lazer", "descricao": "Cinema"}}
+    EXEMPLOS DE CLASSIFICAÇÃO:
+    - "Paguei 45,90 na farmácia" -> {{"valor": 45.90, "categoria": "Saúde", "descricao": "Farmácia", "tipo": "saida"}}
+    - "Gastei 120 de gasolina" -> {{"valor": 120.00, "categoria": "Transporte", "descricao": "Gasolina", "tipo": "saida"}}
+    - "Ganhei 100 reais de um freela" -> {{"valor": 100.00, "categoria": "Renda Extra", "descricao": "Freela", "tipo": "entrada"}}
+    - "Me pagaram 50,50 que tavam devendo" -> {{"valor": 50.50, "categoria": "Renda Extra", "descricao": "Pagamento divida", "tipo": "entrada"}}
     
     Agora, processe a mensagem do usuário usando a mesma lógica dos exemplos acima.
     """

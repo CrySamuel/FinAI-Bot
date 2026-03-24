@@ -12,6 +12,8 @@ from src.database.crud import (
     listar_ultimas_transacoes, apagar_transacao, listar_transacoes
 )
 
+from datetime import datetime
+
 ESCOLHER_TIPO, DIGITAR_VALOR, DIGITAR_DIA = range(3)
 
 
@@ -38,32 +40,61 @@ async def comando_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(mensagem, parse_mode='Markdown')
 
 async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recebe a mensagem, passa pela IA e salva no banco correto"""
     texto_recebido = update.message.text
-    mensagem_espera = await update.message.reply_text("Processando gasto... 🧠")
+    mensagem_espera = await update.message.reply_text("Processando... 🧠")
     
     dados_extraidos = analisar_mensagem_com_ia(texto_recebido)
     
     if dados_extraidos and "valor" in dados_extraidos:
         try:
             db = SessionLocal()
-            criar_transacao(
-                db=db, valor=dados_extraidos["valor"], 
-                categoria=dados_extraidos["categoria"], descricao=dados_extraidos["descricao"]
-            )
-            db.close()
             
-            resposta = (
-                "✅ Gasto registrado!\n"
-                f"🏷️ Categoria: {dados_extraidos['categoria']}\n"
-                f"📝 Descrição: {dados_extraidos['descricao']}\n"
-                f"💰 Valor: R$ {dados_extraidos['valor']:.2f}"
-            )
-            await mensagem_espera.edit_text(resposta)
+            # Pega o tipo que a IA identificou (se não achar, assume que é saida por segurança)
+            tipo_movimentacao = dados_extraidos.get("tipo", "saida")
+            valor = dados_extraidos["valor"]
+            
+            # Formatação BR: Garante 2 casas decimais e troca ponto por vírgula
+            valor_formatado = f"{valor:.2f}".replace('.', ',')
+            
+            if tipo_movimentacao == "entrada":
+                # Salva como uma Renda Extra no dia de hoje
+                dia_hoje = datetime.utcnow().day
+                criar_renda(
+                    db=db, 
+                    descricao=dados_extraidos["descricao"], 
+                    valor=valor, 
+                    dia_recebimento=dia_hoje, 
+                    tipo="extra"
+                )
+                resposta = (
+                    "🤑 *Dinheiro na conta!*\n"
+                    f"🏷️ Categoria: {dados_extraidos['categoria']}\n"
+                    f"📝 Descrição: {dados_extraidos['descricao']}\n"
+                    f"💰 Valor: R$ {valor_formatado}"
+                )
+            else:
+                # Salva como gasto normal
+                criar_transacao(
+                    db=db, 
+                    valor=valor, 
+                    categoria=dados_extraidos["categoria"], 
+                    descricao=dados_extraidos["descricao"]
+                )
+                resposta = (
+                    "✅ *Gasto registrado!*\n"
+                    f"🏷️ Categoria: {dados_extraidos['categoria']}\n"
+                    f"📝 Descrição: {dados_extraidos['descricao']}\n"
+                    f"💰 Valor: R$ {valor_formatado}"
+                )
+                
+            db.close()
+            await mensagem_espera.edit_text(resposta, parse_mode='Markdown')
+            
         except Exception as e:
             await mensagem_espera.edit_text(f"❌ Erro ao salvar: {e}")
     else:
         await mensagem_espera.edit_text("❌ Não entendi. Pode reformular?")
-
 
 async def comando_renda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     teclado = [
@@ -138,6 +169,7 @@ async def cancelar_conversa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def comando_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Calcula e exibe o balanço financeiro"""
     db = SessionLocal()
     resumo = obter_resumo_mes(db)
     db.close()
@@ -146,19 +178,23 @@ async def comando_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     despesas = resumo["despesas"]
     saldo = resumo["saldo"]
 
+    rec_fmt = f"{receitas:.2f}".replace('.', ',')
+    desp_fmt = f"{despesas:.2f}".replace('.', ',')
+    saldo_fmt = f"{saldo:.2f}".replace('.', ',')
+
     mensagem = (
         "📊 *Resumo Financeiro do Mês* 📊\n\n"
-        f"📈 *Total Recebido:* R$ {receitas:.2f}\n"
-        f"📉 *Total Gasto:* R$ {despesas:.2f}\n"
+        f"📈 *Total Recebido:* R$ {rec_fmt}\n"
+        f"📉 *Total Gasto:* R$ {desp_fmt}\n"
         "-------------------------\n"
     )
 
     if saldo > 0:
-        mensagem += f"✅ *Saldo Positivo:* R$ {saldo:.2f}\n\nExcelente! O desafio de 2026 segue firme e forte!"
+        mensagem += f"✅ *Saldo Positivo:* R$ {saldo_fmt}\n\nExcelente! O desafio financeiro segue firme e forte!"
     elif saldo == 0:
-        mensagem += f"⚖️ *Saldo Zerado:* R$ 0.00\n\nFique de olho nos próximos gastos."
+        mensagem += f"⚖️ *Saldo Zerado:* R$ 0,00\n\nFique de olho nos próximos gastos."
     else:
-        mensagem += f"🚨 *Saldo Negativo:* R$ {saldo:.2f}\n\nSinal vermelho! Hora de segurar as despesas."
+        mensagem += f"🚨 *Saldo Negativo:* R$ {saldo_fmt}\n\nSinal vermelho! Hora de segurar as despesas."
 
     await update.message.reply_text(mensagem, parse_mode='Markdown')
 
