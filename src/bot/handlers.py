@@ -26,7 +26,6 @@ async def comando_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def comando_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Lista todas as funcionalidades do bot"""
     mensagem = (
         "🛠️ *Comandos Disponíveis:*\n\n"
         "🗣️ *Texto Livre:* Apenas digite seu gasto (ex: 'Paguei 20 no ifood') para a IA registrar.\n\n"
@@ -43,7 +42,7 @@ async def comando_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(mensagem, parse_mode='Markdown')
 
 async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Recebe a mensagem, passa pela IA e salva no banco correto"""
+    chat_id = update.effective_chat.id # <-- IDENTIDADE CAPTURADA
     texto_recebido = update.message.text
     mensagem_espera = await update.message.reply_text("Processando... 🧠")
     
@@ -52,22 +51,19 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if dados_extraidos and "valor" in dados_extraidos:
         try:
             db = SessionLocal()
-            
-            # Pega o tipo que a IA identificou (se não achar, assume que é saida por segurança)
             tipo_movimentacao = dados_extraidos.get("tipo", "saida")
             valor = dados_extraidos["valor"]
-            
-            # Formatação BR: Garante 2 casas decimais e troca ponto por vírgula
             valor_formatado = f"{valor:.2f}".replace('.', ',')
             
             if tipo_movimentacao == "entrada":
-                # Salva como uma Renda Extra no dia de hoje
                 dia_hoje = datetime.utcnow().day
+                # Passando o chat_id para a renda
                 criar_renda(
                     db=db, 
                     descricao=dados_extraidos["descricao"], 
                     valor=valor, 
                     dia_recebimento=dia_hoje, 
+                    chat_id=chat_id, 
                     tipo="extra"
                 )
                 resposta = (
@@ -77,12 +73,14 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     f"💰 Valor: R$ {valor_formatado}"
                 )
             else:
-                # Salva como gasto normal
+                # Passando o chat_id para o gasto
                 criar_transacao(
                     db=db, 
                     valor=valor, 
                     categoria=dados_extraidos["categoria"], 
-                    descricao=dados_extraidos["descricao"]
+                    descricao=dados_extraidos["descricao"],
+                    tipo="saida",
+                    chat_id=chat_id
                 )
                 resposta = (
                     "✅ *Gasto registrado!*\n"
@@ -143,7 +141,7 @@ async def receber_valor_renda(update: Update, context: ContextTypes.DEFAULT_TYPE
         return DIGITAR_VALOR
 
 async def receber_dia_renda(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Salva no banco e finaliza a conversa"""
+    chat_id = update.effective_chat.id # <-- IDENTIDADE CAPTURADA
     texto_dia = update.message.text
     try:
         dia = int(texto_dia)
@@ -153,7 +151,8 @@ async def receber_dia_renda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         categoria_tipo = "beneficio" if tipo in ["VR", "VT"] else "dinheiro"
         
         db = SessionLocal()
-        criar_renda(db, descricao=tipo, valor=valor, dia_recebimento=dia, tipo=categoria_tipo)
+        # Passando o chat_id na criação da renda mensal
+        criar_renda(db, descricao=tipo, valor=valor, dia_recebimento=dia, chat_id=chat_id, tipo=categoria_tipo)
         db.close()
         
         await update.message.reply_text(
@@ -172,14 +171,14 @@ async def cancelar_conversa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def comando_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Calcula e exibe o balanço financeiro"""
+    chat_id = update.effective_chat.id # <-- IDENTIDADE CAPTURADA
     db = SessionLocal()
-    resumo = obter_resumo_mes(db)
+    resumo = obter_resumo_mes(db, chat_id)
     db.close()
 
     receitas = resumo["receitas"]
     despesas = resumo["despesas"]
-    saldo = resumo["saldo"]
+    saldo = receitas - despesas # <-- CÁLCULO CORRIGIDO!
 
     rec_fmt = f"{receitas:.2f}".replace('.', ',')
     desp_fmt = f"{despesas:.2f}".replace('.', ',')
@@ -202,11 +201,12 @@ async def comando_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(mensagem, parse_mode='Markdown')
 
 async def comando_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id # <-- IDENTIDADE CAPTURADA
     mensagem_espera = await update.message.reply_text("Gerando sua planilha de fechamento... 📊 Aguarde um instante.")
     
     db = SessionLocal()
     nome_arquivo = "Fechamento_FinAI.xlsx"
-    sucesso = gerar_relatorio_excel(db, nome_arquivo)
+    sucesso = gerar_relatorio_excel(db, chat_id, nome_arquivo)
     db.close()
     
     if sucesso and os.path.exists(nome_arquivo):
@@ -223,8 +223,9 @@ async def comando_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await mensagem_espera.edit_text("❌ Não encontrei nenhum gasto registrado para gerar o relatório.")
 
 async def comando_transacoe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id # <-- IDENTIDADE CAPTURADA
     db = SessionLocal()
-    transacoes = listar_transacoes(db)
+    transacoes = listar_transacoes(db, chat_id)
     db.close()
     if not transacoes:
         await update.message.reply_text("Nenhum gasto registrado ainda.")
@@ -238,9 +239,9 @@ async def comando_transacoe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(mensagem, parse_mode='Markdown')
 
 async def comando_ultimos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Mostra os últimos 5 gastos no chat"""
+    chat_id = update.effective_chat.id # <-- IDENTIDADE CAPTURADA
     db = SessionLocal()
-    ultimos = listar_ultimas_transacoes(db)
+    ultimos = listar_ultimas_transacoes(db, chat_id)
     db.close()
 
     if not ultimos:
@@ -255,6 +256,7 @@ async def comando_ultimos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(mensagem, parse_mode='Markdown')
 
 async def comando_apagar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id # <-- IDENTIDADE CAPTURADA
     if not context.args:
         await update.message.reply_text("⚠️ Por favor, informe o ID do gasto. Exemplo: /apagar 3")
         return
@@ -263,7 +265,7 @@ async def comando_apagar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         id_para_apagar = int(context.args[0])
         
         db = SessionLocal()
-        sucesso = apagar_transacao(db, id_para_apagar)
+        sucesso = apagar_transacao(db, id_para_apagar, chat_id)
         db.close()
 
         if sucesso:
@@ -275,9 +277,11 @@ async def comando_apagar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ O ID precisa ser um número. Exemplo: /apagar 3")
 
 async def comando_analise(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id 
+    
     db = SessionLocal()
-    categorias = obter_analise_categorias(db)
-    resumo = obter_resumo_mes(db)
+    categorias = obter_analise_categorias(db, chat_id) 
+    resumo = obter_resumo_mes(db, chat_id)
     db.close()
     
     total_gasto = resumo["despesas"]
@@ -288,7 +292,6 @@ async def comando_analise(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     mensagem = "📊 *Análise de Gastos (Porcentagem)* 📊\n\n"
     
-    # Ordena a lista do maior gasto para o menor
     categorias_ordenadas = sorted(categorias, key=lambda x: x['total'], reverse=True)
     
     for cat in categorias_ordenadas:
@@ -299,7 +302,7 @@ async def comando_analise(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(mensagem, parse_mode='Markdown')
 
 async def comando_filtro(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Busca gastos por palavra-chave e exibe o detalhamento"""
+    chat_id = update.effective_chat.id # <-- IDENTIDADE CAPTURADA
     if not context.args:
         await update.message.reply_text("⚠️ Me diga o que quer buscar. Exemplo: /filtro mercado")
         return
@@ -307,7 +310,7 @@ async def comando_filtro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     termo = " ".join(context.args)
     
     db = SessionLocal()
-    total, transacoes = filtrar_gastos_por_termo(db, termo)
+    total, transacoes = filtrar_gastos_por_termo(db, termo, chat_id)
     db.close()
     
     if total > 0:
@@ -350,5 +353,4 @@ def setup_handlers(app):
     
     app.add_handler(conv_handler)
     
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, processar_mensagem))
-
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, processar_mensagem))    
