@@ -7,7 +7,10 @@ from telegram.ext import (
 import os
 from src.ai.processor import analisar_mensagem_com_ia
 from src.database.database import SessionLocal
-from src.database.crud import criar_transacao, criar_renda, obter_resumo_mes, gerar_relatorio_excel
+from src.database.crud import (
+    criar_transacao, criar_renda, obter_resumo_mes, gerar_relatorio_excel,
+    listar_ultimas_transacoes, apagar_transacao, listar_transacoes
+)
 
 ESCOLHER_TIPO, DIGITAR_VALOR, DIGITAR_DIA = range(3)
 
@@ -27,7 +30,10 @@ async def comando_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💵 */renda* - Cadastra seu salário, adiantamento ou benefícios.\n"
         "⚖️ */saldo* - Mostra o balanço do mês atual (Receitas vs Despesas).\n"
         "📊 */relatorio* - Gera uma planilha Excel detalhada com todo o histórico.\n"
-        "❓ */comandos* - Mostra esta lista de ajuda."
+        "❓ */comandos* - Mostra esta lista de ajuda.\n"
+        "🕒 */ultimos* - Mostra os 5 últimos gastos registrados.\n"
+        "🗑️ */apagar [ID]* - Apaga um gasto incorreto usando o ID.\n"
+        "💰 */transacoes* - Lista todos os gastos registrados.\n"
     )
     await update.message.reply_text(mensagem, parse_mode='Markdown')
 
@@ -177,11 +183,66 @@ async def comando_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await mensagem_espera.edit_text("❌ Não encontrei nenhum gasto registrado para gerar o relatório.")
 
+async def comando_transacoe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = SessionLocal()
+    transacoes = listar_transacoes(db)
+    db.close()
+    if not transacoes:
+        await update.message.reply_text("Nenhum gasto registrado ainda.")
+        return
+    
+    mensagem = "📋 *Lista de Gastos Registrados:*\n\n"
+    for t in transacoes:
+        data_formatada = t.data.strftime("%d/%m %H:%M")
+        mensagem += f"🔹 *ID {t.id}* | {data_formatada}\n{t.categoria}: {t.descricao} - R$ {t.valor:.2f}\n\n"
+
+    await update.message.reply_text(mensagem, parse_mode='Markdown')
+
+async def comando_ultimos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mostra os últimos 5 gastos no chat"""
+    db = SessionLocal()
+    ultimos = listar_ultimas_transacoes(db)
+    db.close()
+
+    if not ultimos:
+        await update.message.reply_text("Nenhum gasto registrado ainda.")
+        return
+
+    mensagem = "🕒 *Últimos 5 registros:*\n\n"
+    for g in ultimos:
+        data_formatada = g.data.strftime("%d/%m %H:%M")
+        mensagem += f"🔹 *ID {g.id}* | {data_formatada}\n{g.categoria}: {g.descricao} - R$ {g.valor:.2f}\n\n"
+
+    await update.message.reply_text(mensagem, parse_mode='Markdown')
+
+async def comando_apagar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("⚠️ Por favor, informe o ID do gasto. Exemplo: /apagar 3")
+        return
+
+    try:
+        id_para_apagar = int(context.args[0])
+        
+        db = SessionLocal()
+        sucesso = apagar_transacao(db, id_para_apagar)
+        db.close()
+
+        if sucesso:
+            await update.message.reply_text(f"🗑️ O registro de ID {id_para_apagar} foi apagado com sucesso!")
+        else:
+            await update.message.reply_text(f"❌ Não encontrei nenhum gasto com o ID {id_para_apagar}.")
+            
+    except ValueError:
+        await update.message.reply_text("⚠️ O ID precisa ser um número. Exemplo: /apagar 3")
+
 def setup_handlers(app):
     app.add_handler(CommandHandler("start", comando_start))
     app.add_handler(CommandHandler("comandos", comando_comandos))
     app.add_handler(CommandHandler("saldo", comando_saldo))
     app.add_handler(CommandHandler("relatorio", comando_relatorio))
+    app.add_handler(CommandHandler("ultimos", comando_ultimos))
+    app.add_handler(CommandHandler("transacoes", comando_transacoe))
+    app.add_handler(CommandHandler("apagar", comando_apagar))
     
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('renda', comando_renda)],
