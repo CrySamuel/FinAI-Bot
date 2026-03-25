@@ -12,6 +12,7 @@ from src.database.crud import (
     listar_ultimas_transacoes, apagar_transacao, listar_transacoes,
     obter_analise_categorias, filtrar_gastos_por_termo
 )
+from src.bot.menu import comando_menu, processar_cliques_menu
 
 from datetime import datetime, timedelta
 from telegram import constants
@@ -20,11 +21,17 @@ ESCOLHER_TIPO, DIGITAR_VALOR, DIGITAR_DIA = range(3)
 
 
 async def comando_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Olá! Eu sou o seu Gestor Financeiro com IA. 📊\n\n"
-        "Para registrar um gasto, basta me mandar uma mensagem normal (ex: 'Gastei 50 no mercado').\n\n"
-        "Para ver tudo o que eu posso fazer, digite /comandos"
+    # Mensagem inicial simpática
+    mensagem_boas_vindas = (
+        "Olá! Eu sou o FinAI, seu assistente financeiro inteligente. 🤖💸\n\n"
+        "Você pode simplesmente me mandar uma mensagem como:\n"
+        "🍕 *'Gastei 50 no ifood'*\n"
+        "🛒 *'Comprei 300 de mercado no cartão'*\n\n"
+        "Ou use o painel abaixo para navegar:"
     )
+    await update.message.reply_text(mensagem_boas_vindas, parse_mode="Markdown")
+    
+    await comando_menu(update, context)
 
 async def comando_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensagem = (
@@ -345,6 +352,8 @@ async def comando_filtro(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"🔍 Nenhum gasto encontrado com a palavra '{termo}'.")
         
 def setup_handlers(app):
+    app.add_handler(CommandHandler("menu", comando_menu))
+    
     app.add_handler(CommandHandler("start", comando_start))
     app.add_handler(CommandHandler("comandos", comando_comandos))
     app.add_handler(CommandHandler("saldo", comando_saldo))
@@ -357,6 +366,8 @@ def setup_handlers(app):
     app.add_handler(CommandHandler("apagar", comando_apagar))
     app.add_handler(CommandHandler("filtro", comando_filtro))
     
+    app.add_handler(CallbackQueryHandler(processar_cliques_menu, pattern="^btn_"))
+
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('renda', comando_renda)],
         states={
