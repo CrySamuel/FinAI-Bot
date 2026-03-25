@@ -5,11 +5,15 @@ from src.database.models import Transacao, Renda
 import pandas as pd
 import os
 
-def criar_transacao(db: Session, valor: float, categoria: str, descricao: str, tipo: str, chat_id: int):
+def criar_transacao(db: Session, valor: float, categoria: str, descricao: str, tipo: str, chat_id: int, data: datetime = None):
     nova_transacao = Transacao(
-        valor=valor, categoria=categoria, descricao=descricao, tipo=tipo, chat_id=chat_id
+        valor=valor,
+        categoria=categoria,
+        descricao=descricao,
+        tipo=tipo,
+        chat_id=chat_id,
+        data=data
     )
-    
     db.add(nova_transacao)
     db.commit()
     db.refresh(nova_transacao)

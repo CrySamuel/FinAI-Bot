@@ -13,7 +13,7 @@ from src.database.crud import (
     obter_analise_categorias, filtrar_gastos_por_termo
 )
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from telegram import constants
 
 ESCOLHER_TIPO, DIGITAR_VALOR, DIGITAR_DIA = range(3)
@@ -57,14 +57,23 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
             valor = dados_extraidos["valor"]
             valor_formatado = f"{valor:.2f}".replace('.', ',')
             
+            data_str = dados_extraidos.get("data")
+            if data_str:
+                try:
+                    data_final = datetime.strptime(data_str, "%Y-%m-%d")
+                except ValueError:
+                    data_final = datetime.utcnow() - timedelta(hours=3)
+            else:
+                data_final = datetime.utcnow() - timedelta(hours=3)
+            # ---------------------------
+            
             if tipo_movimentacao == "entrada":
-                dia_hoje = datetime.utcnow().day
-                # Passando o chat_id para a renda
+                dia_recebimento = data_final.day 
                 criar_renda(
                     db=db, 
                     descricao=dados_extraidos["descricao"], 
                     valor=valor, 
-                    dia_recebimento=dia_hoje, 
+                    dia_recebimento=dia_recebimento, 
                     chat_id=chat_id, 
                     tipo="extra"
                 )
@@ -72,27 +81,30 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     "🤑 *Dinheiro na conta!*\n"
                     f"🏷️ Categoria: {dados_extraidos['categoria']}\n"
                     f"📝 Descrição: {dados_extraidos['descricao']}\n"
-                    f"💰 Valor: R$ {valor_formatado}"
+                    f"💰 Valor: R$ {valor_formatado}\n"
+                    f"📅 Data ref: {data_final.strftime('%d/%m/%Y')}"
                 )
             else:
-                # Passando o chat_id para o gasto
                 criar_transacao(
                     db=db, 
                     valor=valor, 
                     categoria=dados_extraidos["categoria"], 
                     descricao=dados_extraidos["descricao"],
                     tipo="saida",
-                    chat_id=chat_id
+                    chat_id=chat_id,
+                    data=data_final # <- Passando a data final para a função!
                 )
                 resposta = (
                     "✅ *Gasto registrado!*\n"
                     f"🏷️ Categoria: {dados_extraidos['categoria']}\n"
                     f"📝 Descrição: {dados_extraidos['descricao']}\n"
-                    f"💰 Valor: R$ {valor_formatado}"
+                    f"💰 Valor: R$ {valor_formatado}\n"
+                    f"📅 Data: {data_final.strftime('%d/%m/%Y')}"
                 )
                 
             db.close()
-            await mensagem_espera.edit_text(f"✅ Gasto salvo! Categoria: {dados_extraidos['categoria']}")            
+            
+            await mensagem_espera.edit_text(resposta, parse_mode="Markdown")            
         
         except Exception as e:
             await mensagem_espera.edit_text(f"❌ Erro ao salvar: {e}")
@@ -203,7 +215,7 @@ async def comando_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(mensagem, parse_mode='Markdown')
 
 async def comando_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id # <-- IDENTIDADE CAPTURADA
+    chat_id = update.effective_chat.id
     mensagem_espera = await update.message.reply_text("Gerando sua planilha de fechamento... 📊 Aguarde um instante.")
     
     db = SessionLocal()
@@ -224,7 +236,7 @@ async def comando_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await mensagem_espera.edit_text("❌ Não encontrei nenhum gasto registrado para gerar o relatório.")
 
-async def comando_transacoe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def comando_transacoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id # <-- IDENTIDADE CAPTURADA
     db = SessionLocal()
     transacoes = listar_transacoes(db, chat_id)
@@ -337,10 +349,10 @@ def setup_handlers(app):
     app.add_handler(CommandHandler("comandos", comando_comandos))
     app.add_handler(CommandHandler("saldo", comando_saldo))
     
-    app.add_handler(CommandHandler(["relatorio", "relatório"], comando_relatorio))
-    app.add_handler(CommandHandler(["ultimos", "últimos"], comando_ultimos))
-    app.add_handler(CommandHandler(["transacoes", "transações"], comando_transacoe))
-    app.add_handler(CommandHandler(["analise", "análise"], comando_analise))
+    app.add_handler(CommandHandler("relatorio", comando_relatorio))
+    app.add_handler(CommandHandler("ultimos", comando_ultimos))
+    app.add_handler(CommandHandler("transacoes", comando_transacoes)) 
+    app.add_handler(CommandHandler("analise", comando_analise))
     
     app.add_handler(CommandHandler("apagar", comando_apagar))
     app.add_handler(CommandHandler("filtro", comando_filtro))

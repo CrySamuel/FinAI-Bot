@@ -2,22 +2,23 @@ import os
 import requests
 import json
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Garante que as variáveis do .env estão carregadas
 load_dotenv()
 
 def analisar_mensagem_com_ia(texto_usuario: str) -> dict:
-    """
-    Envia a mensagem para a API ultra-rápida do Groq (usando Llama 3) 
-    e retorna os dados financeiros.
-    """
+
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         print("Erro: GROQ_API_KEY não encontrada no arquivo .env!")
         return None
 
+    hoje_str = datetime.now().strftime("%Y-%m-%d")
+
     prompt_sistema = f"""
-    Você é um assistente financeiro. Extraia os dados da mensagem do usuário no formato JSON com as chaves: 'valor' (float), 'categoria' (string), 'descricao' (string) e 'tipo' ('entrada' ou 'saida')    
+    Você é um assistente financeiro. Hoje é dia {hoje_str}.
+    Extraia os dados da mensagem do usuário no formato JSON com as chaves: 'valor' (float), 'categoria' (string), 'descricao' (string), 'tipo' ('entrada' ou 'saida') e 'data' (string).    
     Leia a mensagem: "{texto_usuario}"
     
     Regras OBRIGATÓRIAS:
@@ -27,6 +28,9 @@ def analisar_mensagem_com_ia(texto_usuario: str) -> dict:
     4. e o usuário mencionar que pagou no 'crédito', 'cartão' ou 'parcelado', coloque a tag '[Crédito] ' no início da 'descricao' (ex: '[Crédito] Compra do mês'). Não repita a palavra crédito.
     5. A 'categoria' deve ser o local ou tipo exato do gasto (ex: Mercado, Transporte, Farmácia, Lazer). NUNCA use termos genéricos como 'Despesas' ou 'Saída
     
+    Regra da DATA: Se o usuário mencionar uma data específica (ex: 'dia 20 de fevereiro', 'ontem', 'semana passada', 'mes passado'), calcule e retorne a data exata no formato 'AAAA-MM-DD'. 
+    Se o usuário NÃO mencionar nenhuma data, retorne exatamente '{hoje_str}'.
+
     EXEMPLOS DE CLASSIFICAÇÃO:
     - "Paguei 45,90 na farmácia" -> {{"valor": 45.90, "categoria": "Saúde", "descricao": "Farmácia", "tipo": "saida"}}
     - "Gastei 120 de gasolina" -> {{"valor": 120.00, "categoria": "Transporte", "descricao": "Gasolina", "tipo": "saida"}}
