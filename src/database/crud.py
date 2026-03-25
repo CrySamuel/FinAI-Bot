@@ -33,7 +33,6 @@ def criar_renda(db: Session, descricao: str, valor: float, dia_recebimento: int,
     return nova_renda
 
 def listar_rendas(db: Session, chat_id: int):
-    # BLINDADO
     return db.query(Renda).filter(Renda.chat_id == chat_id).all()
 
 def obter_resumo_mes(db: Session, chat_id: int):
@@ -42,10 +41,8 @@ def obter_resumo_mes(db: Session, chat_id: int):
         Transacao.chat_id == chat_id 
     ).scalar() or 0.0
     
-    # CORRIGIDO: Adicionada a busca que calcula as entradas do chat!
-    entradas = db.query(func.sum(Transacao.valor)).filter(
-        Transacao.tipo == "entrada",
-        Transacao.chat_id == chat_id 
+    entradas = db.query(func.sum(Renda.valor)).filter(
+        Renda.chat_id == chat_id 
     ).scalar() or 0.0
     
     return {"despesas": saidas, "receitas": entradas}
