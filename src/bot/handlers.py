@@ -5,6 +5,7 @@ from telegram.ext import (
 )
 
 import os, re
+import json
 from src.ai.processor import analisar_mensagem_com_ia
 from src.database.database import SessionLocal
 from src.database.crud import (
@@ -19,9 +20,7 @@ from telegram import constants
 
 ESCOLHER_TIPO, DIGITAR_VALOR, DIGITAR_DIA = range(3)
 
-
 async def comando_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Mensagem inicial simpática
     mensagem_boas_vindas = (
         "Olá! Eu sou o FinAI, seu assistente financeiro inteligente. 🤖💸\n\n"
         "Você pode simplesmente me mandar uma mensagem como:\n"

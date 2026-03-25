@@ -4,39 +4,37 @@ import json
 from dotenv import load_dotenv
 from datetime import datetime
 
-# Garante que as variáveis do .env estão carregadas
 load_dotenv()
 
 def analisar_mensagem_com_ia(texto_usuario: str) -> dict:
-
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         print("Erro: GROQ_API_KEY não encontrada no arquivo .env!")
         return None
 
     hoje_str = datetime.now().strftime("%Y-%m-%d")
+    
+    categorias_permitidas = [
+        "Alimentação", "Transporte", "Moradia", "Saúde", 
+        "Lazer", "Educação", "Serviços", "Compras", "Renda Extra", "Outros"
+    ]
 
     prompt_sistema = f"""
     Você é um assistente financeiro. Hoje é dia {hoje_str}.
-    Extraia os dados da mensagem do usuário no formato JSON com as chaves: 'valor' (float), 'categoria' (string), 'descricao' (string), 'tipo' ('entrada' ou 'saida') e 'data' (string).    
-    Leia a mensagem: "{texto_usuario}"
+    Extraia os dados da mensagem do usuário no formato JSON.
     
     Regras OBRIGATÓRIAS:
-    1. Responda EXCLUSIVAMENTE com um JSON válido. Não adicione nenhum texto antes ou depois.
-    2. Use as chaves: "valor" (float, use PONTO para os decimais, ex: 15.50), "categoria", "descricao", e "tipo".
-    3. A chave "tipo" deve ser estritamente "entrada" (dinheiro ganho/recebido) ou "saida" (dinheiro gasto/pago).
-    4. e o usuário mencionar que pagou no 'crédito', 'cartão' ou 'parcelado', coloque a tag '[Crédito] ' no início da 'descricao' (ex: '[Crédito] Compra do mês'). Não repita a palavra crédito.
-    5. A 'categoria' deve ser o local ou tipo exato do gasto (ex: Mercado, Transporte, Farmácia, Lazer). NUNCA use termos genéricos como 'Despesas' ou 'Saída
-    
-    Regra da DATA: Se o usuário mencionar uma data específica (ex: 'dia 20 de fevereiro', 'ontem', 'semana passada', 'mes passado'), calcule e retorne a data exata no formato 'AAAA-MM-DD'. 
-    Se o usuário NÃO mencionar nenhuma data, retorne exatamente '{hoje_str}'.
+    1. Responda EXCLUSIVAMENTE com um JSON válido.
+    2. Use as chaves: "valor" (float, use PONTO para os decimais, ex: 15.50), "categoria", "descricao", "tipo" e "data".
+    3. A chave "tipo" deve ser estritamente "entrada" ou "saida".
+    4. Se o usuário mencionar que pagou no 'crédito', 'cartão' ou 'parcelado', coloque a tag '[Crédito] ' no início da 'descricao' (ex: '[Crédito] Compra do mês').
+    5. A 'categoria' DEVE OBRIGATORIAMENTE ser UMA destas opções exatas: {', '.join(categorias_permitidas)}. NUNCA invente uma categoria fora desta lista. Se houver dúvida, use "Outros".
+    6. Regra da DATA: Se o usuário mencionar uma data específica (ex: 'dia 20', 'ontem'), calcule e retorne a data exata no formato 'AAAA-MM-DD'. Se NÃO mencionar data, retorne '{hoje_str}'.
 
-    EXEMPLOS DE CLASSIFICAÇÃO:
-    - "Paguei 45,90 na farmácia" -> {{"valor": 45.90, "categoria": "Saúde", "descricao": "Farmácia", "tipo": "saida"}}
-    - "Gastei 120 de gasolina" -> {{"valor": 120.00, "categoria": "Transporte", "descricao": "Gasolina", "tipo": "saida"}}
-    - "Ganhei 100 reais de um freela" -> {{"valor": 100.00, "categoria": "Renda Extra", "descricao": "Freela", "tipo": "entrada"}}
-    
-    Gere apenas o JSON e nada mais:
+    EXEMPLOS DE CLASSIFICAÇÃO (Retorne APENAS o JSON e nada mais):
+    - "Paguei 45,90 na farmácia" -> {{"valor": 45.90, "categoria": "Saúde", "descricao": "Farmácia", "tipo": "saida", "data": "{hoje_str}"}}
+    - "Gastei 120 de gasolina ontem" -> {{"valor": 120.00, "categoria": "Transporte", "descricao": "Gasolina", "tipo": "saida", "data": "2024-03-24"}}
+    - "Ganhei 100 reais de um freela" -> {{"valor": 100.00, "categoria": "Renda Extra", "descricao": "Freela", "tipo": "entrada", "data": "{hoje_str}"}}
     """
 
     url = "https://api.groq.com/openai/v1/chat/completions"
@@ -52,7 +50,8 @@ def analisar_mensagem_com_ia(texto_usuario: str) -> dict:
             {"role": "system", "content": prompt_sistema},
             {"role": "user", "content": texto_usuario}
         ],
-        "temperature": 0.0
+        "temperature": 0.0,
+        "response_format": {"type": "json_object"} 
     }
 
     try:
@@ -68,11 +67,17 @@ def analisar_mensagem_com_ia(texto_usuario: str) -> dict:
             dados_gerados = dados_gerados.replace("```", "").strip()
             
         dados_estruturados = json.loads(dados_gerados)
+        
+        if dados_estruturados.get("categoria") not in categorias_permitidas:
+            dados_estruturados["categoria"] = "Outros"
+            
         return dados_estruturados
         
     except requests.exceptions.HTTPError as e:
-        # Agora, se der erro, o terminal vai imprimir exatamente o que a Groq reclamou
         print(f"Erro da API Groq (HTTP {e.response.status_code}): {e.response.text}")
+        return None
+    except json.JSONDecodeError:
+        print(f"Erro: A IA não retornou um JSON válido. Resposta crua: {dados_gerados}")
         return None
     except Exception as e:
         print(f"Erro interno ao processar IA: {e}")
