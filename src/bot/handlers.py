@@ -271,23 +271,70 @@ async def comando_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await mensagem_espera.edit_text("❌ Não encontrei nenhum gasto registrado para gerar o relatório.")
 
 async def comando_transacoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id # <-- IDENTIDADE CAPTURADA
+    chat_id = update.effective_chat.id
     db = SessionLocal()
-    transacoes = listar_transacoes(db, chat_id)
-    db.close()
-    if not transacoes:
-        await update.message.reply_text("Nenhum gasto registrado ainda.")
-        return
     
-    mensagem = "📋 *Lista de Gastos Registrados:*\n\n"
-    for t in transacoes:
-        data_formatada = t.data.strftime("%d/%m %H:%M")
-        mensagem += f"🔹 *ID {t.id}* | {data_formatada}\n{t.categoria}: {t.descricao} - R$ {t.valor:.2f}\n\n"
+    try:
+        from src.database.models import Transacao, Renda
+        from datetime import date
+        
+        saidas = db.query(Transacao).filter(Transacao.chat_id == chat_id).all()
+        entradas = db.query(Renda).filter(Renda.chat_id == chat_id).all()
+        
+        if not saidas and not entradas:
+            await update.message.reply_text("📭 Nenhuma movimentação encontrada.")
+            return
 
-    await update.message.reply_text(mensagem, parse_mode='Markdown')
+        movimentacoes = []
+        hoje = date.today()
+        
+        for s in saidas:
+            data_transacao = s.data.date() if getattr(s, 'data', None) else hoje
+            movimentacoes.append({
+                "tipo": "saida",
+                "valor": s.valor,
+                "categoria": s.categoria,
+                "descricao": s.descricao,
+                "data": data_transacao
+            })
+            
+        for e in entradas:
+            try:
+                data_renda = date(hoje.year, hoje.month, int(e.dia_recebimento))
+            except (ValueError, TypeError):
+                data_renda = hoje
+                
+            movimentacoes.append({
+                "tipo": "entrada",
+                "valor": e.valor,
+                "categoria": "Receita",
+                "descricao": e.descricao,
+                "data": data_renda
+            })
+            
+        movimentacoes.sort(key=lambda x: x["data"], reverse=True)
+        
+        ultimas_movimentacoes = movimentacoes[:15]
+        
+        texto = "📋 *Extrato de Transações*\n━━━━━━━━━━━━━━━━\n"
+        
+        for m in ultimas_movimentacoes:
+            icone = "🔴" if m["tipo"] == "saida" else "🟢"
+            data_formatada = m["data"].strftime("%d/%m")
+            valor_formatado = f"{m['valor']:.2f}".replace('.', ',')
+            
+            texto += f"{icone} *{data_formatada}* | {m['categoria']}\n"
+            texto += f"    └ R$ {valor_formatado} ({m['descricao']})\n\n"
+            
+        await update.message.reply_text(texto, parse_mode="Markdown")
+        
+    except Exception as e:
+        await update.message.reply_text(f"❌ Erro ao listar transações: {e}")
+    finally:
+        db.close()
 
 async def comando_ultimos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id # <-- IDENTIDADE CAPTURADA
+    chat_id = update.effective_chat.id 
     db = SessionLocal()
     ultimos = listar_ultimas_transacoes(db, chat_id)
     db.close()
