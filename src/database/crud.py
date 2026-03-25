@@ -108,3 +108,34 @@ def filtrar_gastos_por_termo(db: Session, termo: str, chat_id: int):
     
     total = sum(t.valor for t in transacoes)
     return total, transacoes
+    
+def verificar_meta_categoria(db: Session, chat_id: int, categoria: str):
+    from src.database.models import Transacao, Meta
+    from datetime import date
+    from sqlalchemy import func, extract
+
+    meta = db.query(Meta).filter(
+        Meta.chat_id == chat_id, 
+        Meta.categoria.ilike(categoria) 
+    ).first()
+
+    if not meta:
+        return None
+
+    hoje = date.today()
+    total_gasto = db.query(func.sum(Transacao.valor)).filter(
+        Transacao.chat_id == chat_id,
+        Transacao.categoria.ilike(categoria),
+        extract('month', Transacao.data) == hoje.month,
+        extract('year', Transacao.data) == hoje.year
+    ).scalar() or 0.0
+
+    restante = meta.valor_limite - total_gasto
+    percentual = (total_gasto / meta.valor_limite) * 100
+
+    return {
+        "limite": meta.valor_limite,
+        "gasto": total_gasto,
+        "restante": restante,
+        "percentual": percentual
+    }

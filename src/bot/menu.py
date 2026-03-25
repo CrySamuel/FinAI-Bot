@@ -177,7 +177,6 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
             parse_mode="Markdown"
         )
 
-    # Agora o Python escuta corretamente o padrão novo
     elif escolha.startswith("btn_rel_"):
         await query.edit_message_text("⏳ *Filtrando dados e gerando Excel...*", parse_mode="Markdown")
         
@@ -188,14 +187,12 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
         hoje = date.today()
         limite_data = None
         
-        # Ajustamos os IFs para o novo nome
         if escolha == "btn_rel_7":
             limite_data = hoje - timedelta(days=7)
         elif escolha == "btn_rel_30":
             limite_data = hoje - timedelta(days=30)
         elif escolha == "btn_rel_90":
             limite_data = hoje - timedelta(days=90)
-        # Se for "btn_rel_tudo", o limite_data continua None
 
         db = SessionLocal()
         try:
@@ -210,7 +207,7 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
                 data_item = s.data.date() if getattr(s, 'data', None) else hoje
                 dados_unificados.append({
                     "Data": data_item,
-                    "Tipo": "Saída 🔴",
+                    "Tipo": "Saída",
                     "Categoria": s.categoria,
                     "Descrição": s.descricao,
                     "Valor": s.valor * -1
@@ -224,7 +221,7 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
                     
                 dados_unificados.append({
                     "Data": data_item,
-                    "Tipo": "Entrada 🟢",
+                    "Tipo": "Entrada",
                     "Categoria": "Receita",
                     "Descrição": e.descricao,
                     "Valor": e.valor
@@ -246,24 +243,106 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
             
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False, sheet_name='Balanco')
-                worksheet = writer.sheets['Balanco']
+                df.to_excel(writer, index=False, sheet_name='Relatório FinAI')
+                workbook = writer.book
+                worksheet = writer.sheets['Relatório FinAI']
+
+                from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
                 
-                for col, largura in {'A': 15, 'B': 15, 'C': 20, 'D': 35, 'E': 15}.items():
-                    worksheet.column_dimensions[col].width = largura
+                # Definição de Estilos
+                header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+                header_font = Font(color="FFFFFF", bold=True, size=12)
+                verde_suave = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+                vermelho_suave = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+                cinza_total = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
                 
-                from openpyxl.styles import Font
-                for cell in worksheet['E']:
-                    if cell.row == 1: continue
-                    cell.number_format = '"R$" #,##0.00'
-                    if cell.value and cell.value < 0:
-                        cell.font = Font(color="FF0000") 
-                    elif cell.value and cell.value > 0:
-                        cell.font = Font(color="00B050")
+                center_alignment = Alignment(horizontal="center", vertical="center")
+                thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                                    top=Side(style='thin'), bottom=Side(style='thin'))
+
+                # 2. Estilizando o Cabeçalho (Linha 1)
+                for cell in worksheet[1]:
+                    cell.fill = header_fill
+                    cell.font = header_font
+                    cell.alignment = center_alignment
+                    cell.border = thin_border
+
+                # 3. Loop Único para Estilizar os Dados (Linha 2 em diante)
+                for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row):
+                    data_cell = row[0]
+                    tipo_cell = row[1]
+                    valor_cell = row[4]
+
+                    # Formatação de Data e Alinhamento Central
+                    data_cell.number_format = 'DD/MM/YYYY'
+                    data_cell.alignment = center_alignment
+                    tipo_cell.alignment = center_alignment
+
+                    # Lógica de Cores por Tipo (Entrada vs Saída)
+                    if "Saída" in str(tipo_cell.value):
+                        tipo_cell.fill = vermelho_suave
+                        valor_cell.font = Font(color="9C0006", bold=True) # Vermelho escuro
+                    else:
+                        tipo_cell.fill = verde_suave
+                        valor_cell.font = Font(color="006100", bold=True) # Verde escuro
+                    
+                    # Formatação de Moeda
+                    valor_cell.number_format = '"R$" #,##0.00'
+                    
+                    # Aplica bordas em todas as células da linha
+                    for cell in row:
+                        cell.border = thin_border
+
+                # 4. Ajuste Automático de Colunas (Inteligente)
+                for column in worksheet.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if cell.value:
+                                length = len(str(cell.value))
+                                if length > max_length: max_length = length
+                        except: pass
+                    worksheet.column_dimensions[column_letter].width = max_length + 4
+
+                # 5. Linha de Totalizador Final
+                total_row = worksheet.max_row + 1
+                saldo = df['Valor'].sum()
+                
+                # Preenche a linha de total com cor de fundo cinza e bordas
+                for col_idx in range(1, 6):
+                    cell = worksheet.cell(row=total_row, column=col_idx)
+                    cell.fill = cinza_total
+                    cell.border = thin_border
+                
+                # Texto e Valor do Saldo
+                label_cell = worksheet.cell(row=total_row, column=4, value="SALDO TOTAL:")
+                label_cell.font = Font(bold=True)
+                label_cell.alignment = Alignment(horizontal="right")
+                
+                saldo_cell = worksheet.cell(row=total_row, column=5, value=saldo)
+                saldo_cell.font = Font(bold=True, color="000000")
+                saldo_cell.number_format = '"R$" #,##0.00'
 
             buffer.seek(0)
             
-            # Ajustamos a limpeza do nome do arquivo também
+            # Envio do Documento
+            nome_periodo = escolha.replace("btn_rel_", "")
+            arquivo_nome = f"Relatorio_FinAI_{nome_periodo}dias.xlsx" if nome_periodo != "tudo" else "Relatorio_FinAI_Completo.xlsx"
+            
+            await context.bot.send_document(
+                chat_id=chat_id,
+                document=buffer,
+                filename=arquivo_nome,
+                caption="✅ *Seu relatório está pronto!*",
+                parse_mode="Markdown"
+            )
+            
+            teclado_voltar = [[InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="btn_voltar")]]
+            await query.edit_message_text("📈 Relatório enviado com sucesso!", reply_markup=InlineKeyboardMarkup(teclado_voltar))
+
+            buffer.seek(0)
+            
             nome_periodo = escolha.replace("btn_rel_", "")
             arquivo_nome = f"Relatorio_FinAI_{nome_periodo}dias.xlsx" if nome_periodo != "tudo" else "Relatorio_FinAI_Completo.xlsx"
             
@@ -282,6 +361,6 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
             await query.edit_message_text(f"❌ Erro ao gerar Excel: {e}")
         finally:
             db.close()
-            
+
     elif escolha == "btn_renda":
         await query.message.reply_text("Para adicionar renda, por favor digite o comando /renda")

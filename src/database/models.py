@@ -27,4 +27,12 @@ class Renda(Base):
     dia_recebimento = Column(Integer, nullable=True)  
     tipo = Column(String, default="dinheiro")        
 
+class Meta(Base):
+    __tablename__ = "metas"
+
+    id = Column(Integer, primary_key=True, index=True)
+    chat_id = Column(BigInteger, index=True)
+    categoria = Column(String, index=True)
+    valor_limite = Column(Float)
+
 Base.metadata.create_all(bind=engine)

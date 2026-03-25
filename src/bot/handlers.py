@@ -4,8 +4,10 @@ from telegram.ext import (
     ConversationHandler, CallbackQueryHandler
 )
 
+from src.database.crud import verificar_meta_categoria
 import os, re
 import json
+from src.database.models import Meta
 from src.ai.processor import analisar_mensagem_com_ia
 from src.database.database import SessionLocal
 from src.database.crud import (
@@ -71,7 +73,6 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     data_final = datetime.utcnow() - timedelta(hours=3)
             else:
                 data_final = datetime.utcnow() - timedelta(hours=3)
-            # ---------------------------
             
             if tipo_movimentacao == "entrada":
                 dia_recebimento = data_final.day 
@@ -91,6 +92,7 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     f"📅 Data ref: {data_final.strftime('%d/%m/%Y')}"
                 )
             else:
+                # 1. Registra no Banco
                 criar_transacao(
                     db=db, 
                     valor=valor, 
@@ -98,19 +100,38 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     descricao=dados_extraidos["descricao"],
                     tipo="saida",
                     chat_id=chat_id,
-                    data=data_final # <- Passando a data final para a função!
+                    data=data_final 
                 )
-                resposta = (
+
+                # 2. Cria o texto base do gasto
+                texto_gasto = (
                     "✅ *Gasto registrado!*\n"
                     f"🏷️ Categoria: {dados_extraidos['categoria']}\n"
                     f"📝 Descrição: {dados_extraidos['descricao']}\n"
                     f"💰 Valor: R$ {valor_formatado}\n"
                     f"📅 Data: {data_final.strftime('%d/%m/%Y')}"
                 )
-                
+                                
+                status_meta = ""
+                try:
+                    info_meta = verificar_meta_categoria(db, chat_id, dados_extraidos["categoria"])
+
+                    if info_meta: 
+                        emoji_status = "✅" if info_meta['restante'] > 0 else "⚠️"
+                        status_meta = (
+                            f"\n\n{emoji_status} *Status da Meta: {dados_extraidos['categoria'].capitalize()}*\n"
+                            f"💰 Gasto: R$ {info_meta['gasto']:.2f} / R$ {info_meta['limite']:.2f}\n"
+                            f"📊 {info_meta['percentual']:.1f}% consumido."
+                        )
+                        if info_meta['restante'] < 0:
+                            status_meta += f"\n🚨 *Limite excedido em R$ {abs(info_meta['restante']):.2f}!*"
+                except Exception as e:
+                    print(f"Erro ao buscar meta: {e}")
+
+                resposta = texto_gasto + status_meta
+
             db.close()
-            
-            await mensagem_espera.edit_text(resposta, parse_mode="Markdown")            
+            await mensagem_espera.edit_text(resposta, parse_mode="Markdown")         
         
         except Exception as e:
             await mensagem_espera.edit_text(f"❌ Erro ao salvar: {e}")
@@ -453,6 +474,30 @@ async def comando_filtro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(f"🔍 Nenhum gasto encontrado com a palavra '{termo}'.")
         
+async def comando_definir_meta(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    try:
+        categoria = context.args[0].capitalize()
+        valor = float(context.args[1].replace(',', '.'))
+        
+        db = SessionLocal()
+        meta_existente = db.query(Meta).filter(Meta.chat_id == chat_id, Meta.categoria == categoria).first()
+        
+        if meta_existente:
+            meta_existente.valor_limite = valor
+        else:
+            nova_meta = Meta(chat_id=chat_id, categoria=categoria, valor_limite=valor)
+            db.add(nova_meta)
+        
+        db.commit()
+
+        
+        db.close()
+        
+        await update.message.reply_text(f"🎯 Meta de *{categoria}* definida para *R$ {valor:.2f}*!", parse_mode="Markdown")
+    except (IndexError, ValueError):
+        await update.message.reply_text("❌ Use: `/meta Categoria Valor` (Ex: `/meta Lazer 500`)", parse_mode="Markdown")
+
 def setup_handlers(app):
     app.add_handler(CommandHandler("menu", comando_menu))
     
@@ -469,11 +514,12 @@ def setup_handlers(app):
     app.add_handler(CommandHandler("filtro", comando_filtro))
     
     app.add_handler(CallbackQueryHandler(processar_cliques_menu, pattern="^btn_"))
+    app.add_handler(CommandHandler("meta", comando_definir_meta))
 
     conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler('renda', comando_renda),
-            CallbackQueryHandler(comando_renda, pattern="^renda_start$") # <-- A CONEXÃO ACONTECE AQUI!
+            CallbackQueryHandler(comando_renda, pattern="^renda_start$") 
         ],
         states={
             ESCOLHER_TIPO: [CallbackQueryHandler(receber_tipo_renda)],
