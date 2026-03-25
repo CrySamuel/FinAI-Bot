@@ -161,9 +161,42 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
             await query.edit_message_text(f"❌ Erro ao buscar últimas movimentações: {e}")
         finally:
             db.close()
+
     elif escolha == "btn_relatorio":
-        await query.edit_message_text("⏳ *Gerando seu relatório completo...*\nUnificando entradas e saídas.", parse_mode="Markdown")
+        teclado_datas = [
+            # Colocamos o prefixo "btn_" em todos eles
+            [InlineKeyboardButton("📅 Últimos 7 Dias", callback_data="btn_rel_7")],
+            [InlineKeyboardButton("📅 Último Mês", callback_data="btn_rel_30")],
+            [InlineKeyboardButton("📅 Últimos 3 Meses", callback_data="btn_rel_90")],
+            [InlineKeyboardButton("📚 Tudo", callback_data="btn_rel_tudo")],
+            [InlineKeyboardButton("🔙 Voltar", callback_data="btn_voltar")]
+        ]
+        await query.edit_message_text(
+            "📅 *Selecione o período do relatório:*", 
+            reply_markup=InlineKeyboardMarkup(teclado_datas), 
+            parse_mode="Markdown"
+        )
+
+    # Agora o Python escuta corretamente o padrão novo
+    elif escolha.startswith("btn_rel_"):
+        await query.edit_message_text("⏳ *Filtrando dados e gerando Excel...*", parse_mode="Markdown")
         
+        from datetime import date, timedelta
+        import io
+        import pandas as pd
+        
+        hoje = date.today()
+        limite_data = None
+        
+        # Ajustamos os IFs para o novo nome
+        if escolha == "btn_rel_7":
+            limite_data = hoje - timedelta(days=7)
+        elif escolha == "btn_rel_30":
+            limite_data = hoje - timedelta(days=30)
+        elif escolha == "btn_rel_90":
+            limite_data = hoje - timedelta(days=90)
+        # Se for "btn_rel_tudo", o limite_data continua None
+
         db = SessionLocal()
         try:
             from src.database.models import Transacao, Renda
@@ -171,56 +204,57 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
             saidas = db.query(Transacao).filter(Transacao.chat_id == chat_id).all()
             entradas = db.query(Renda).filter(Renda.chat_id == chat_id).all()
             
-            if not saidas and not entradas:
-                teclado_voltar = [[InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="btn_voltar")]]
-                await query.edit_message_text("📭 Nenhuma movimentação encontrada para gerar relatório.", reply_markup=InlineKeyboardMarkup(teclado_voltar))
-                return
-
             dados_unificados = []
-            hoje = date.today()
             
             for s in saidas:
+                data_item = s.data.date() if getattr(s, 'data', None) else hoje
                 dados_unificados.append({
-                    "Data": s.data.date() if s.data else None,
+                    "Data": data_item,
                     "Tipo": "Saída 🔴",
                     "Categoria": s.categoria,
                     "Descrição": s.descricao,
-                    "Valor": s.valor * -1  
+                    "Valor": s.valor * -1
                 })
                 
             for e in entradas:
                 try:
-                    data_fake = date(hoje.year, hoje.month, int(e.dia_recebimento))
+                    data_item = date(hoje.year, hoje.month, int(e.dia_recebimento))
                 except (ValueError, TypeError):
-                    data_fake = hoje
-
+                    data_item = hoje
+                    
                 dados_unificados.append({
-                    "Data": data_fake,
+                    "Data": data_item,
                     "Tipo": "Entrada 🟢",
                     "Categoria": "Receita",
                     "Descrição": e.descricao,
                     "Valor": e.valor
                 })
-            
+
+            if limite_data:
+                dados_unificados = [item for item in dados_unificados if item["Data"] >= limite_data]
+
+            if not dados_unificados:
+                teclado_voltar = [[InlineKeyboardButton("🔙 Voltar aos Períodos", callback_data="btn_relatorio")]]
+                await query.edit_message_text(
+                    "📭 Nenhuma movimentação encontrada neste período.", 
+                    reply_markup=InlineKeyboardMarkup(teclado_voltar)
+                )
+                return
+
             df = pd.DataFrame(dados_unificados)
-            df['Data'] = pd.to_datetime(df['Data']).dt.date 
             df = df.sort_values(by="Data", ascending=False)
             
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False, sheet_name='Balanco_FinAI')
+                df.to_excel(writer, index=False, sheet_name='Balanco')
+                worksheet = writer.sheets['Balanco']
                 
-                worksheet = writer.sheets['Balanco_FinAI']
-                
-                colunas = {'A': 15, 'B': 15, 'C': 20, 'D': 35, 'E': 15}
-                for col, largura in colunas.items():
+                for col, largura in {'A': 15, 'B': 15, 'C': 20, 'D': 35, 'E': 15}.items():
                     worksheet.column_dimensions[col].width = largura
                 
                 from openpyxl.styles import Font
-                
                 for cell in worksheet['E']:
-                    if cell.row == 1: continue 
-                    
+                    if cell.row == 1: continue
                     cell.number_format = '"R$" #,##0.00'
                     if cell.value and cell.value < 0:
                         cell.font = Font(color="FF0000") 
@@ -228,22 +262,26 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
                         cell.font = Font(color="00B050")
 
             buffer.seek(0)
-            data_hoje = datetime.now().strftime('%d_%m_%Y')
+            
+            # Ajustamos a limpeza do nome do arquivo também
+            nome_periodo = escolha.replace("btn_rel_", "")
+            arquivo_nome = f"Relatorio_FinAI_{nome_periodo}dias.xlsx" if nome_periodo != "tudo" else "Relatorio_FinAI_Completo.xlsx"
             
             await context.bot.send_document(
                 chat_id=chat_id,
                 document=buffer,
-                filename=f"Relatorio_Completo_{data_hoje}.xlsx",
-                caption="✅ *Relatório unificado pronto!*\nAs saídas aparecem em vermelho (negativo) para facilitar o cálculo do saldo no Excel."
+                filename=arquivo_nome,
+                caption="✅ *Seu relatório está pronto!*",
+                parse_mode="Markdown"
             )
             
             teclado_voltar = [[InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="btn_voltar")]]
-            await query.edit_message_text("📈 Relatório enviado!", reply_markup=InlineKeyboardMarkup(teclado_voltar))
+            await query.edit_message_text("📈 Relatório enviado com sucesso!", reply_markup=InlineKeyboardMarkup(teclado_voltar))
             
         except Exception as e:
-            await query.edit_message_text(f"❌ Erro no Excel: {e}")
+            await query.edit_message_text(f"❌ Erro ao gerar Excel: {e}")
         finally:
             db.close()
-
+            
     elif escolha == "btn_renda":
         await query.message.reply_text("Para adicionar renda, por favor digite o comando /renda")

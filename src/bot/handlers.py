@@ -248,26 +248,20 @@ async def comando_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(mensagem, parse_mode='Markdown')
 
 async def comando_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    mensagem_espera = await update.message.reply_text("Gerando sua planilha de fechamento... 📊 Aguarde um instante.")
+    """Acionado quando o usuário digita /relatorio"""
     
-    db = SessionLocal()
-    nome_arquivo = "Fechamento_FinAI.xlsx"
-    sucesso = gerar_relatorio_excel(db, chat_id, nome_arquivo)
-    db.close()
+    teclado_datas = [
+        [InlineKeyboardButton("📅 Últimos 7 Dias", callback_data="btn_rel_7")],
+        [InlineKeyboardButton("📅 Último Mês", callback_data="btn_rel_30")],
+        [InlineKeyboardButton("📅 Últimos 3 Meses", callback_data="btn_rel_90")],
+        [InlineKeyboardButton("📚 Tudo", callback_data="btn_rel_tudo")]
+    ]
     
-    if sucesso and os.path.exists(nome_arquivo):
-        with open(nome_arquivo, 'rb') as documento:
-            await update.message.reply_document(
-                document=documento,
-                filename="Fechamento_Mensal.xlsx",
-                caption="Aqui está o seu relatório detalhado de gastos! 📁\nPronto para análise no Excel ou Google Sheets."
-            )
-        
-        os.remove(nome_arquivo)
-        await mensagem_espera.delete() 
-    else:
-        await mensagem_espera.edit_text("❌ Não encontrei nenhum gasto registrado para gerar o relatório.")
+    await update.message.reply_text(
+        "📅 *Selecione o período do relatório:*", 
+        reply_markup=InlineKeyboardMarkup(teclado_datas), 
+        parse_mode="Markdown"
+    )
 
 async def comando_transacoes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
