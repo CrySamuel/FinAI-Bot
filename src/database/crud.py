@@ -24,7 +24,7 @@ def criar_renda(db: Session, descricao: str, valor: float, dia_recebimento: int,
         valor=valor,
         dia_recebimento=dia_recebimento,
         tipo=tipo,
-        chat_id=chat_id # Adicionado o chat_id na Renda também!
+        chat_id=chat_id 
     )
     
     db.add(nova_renda)
@@ -48,7 +48,6 @@ def obter_resumo_mes(db: Session, chat_id: int):
     return {"despesas": saidas, "receitas": entradas}
 
 def gerar_relatorio_excel(db: Session, chat_id: int, caminho_arquivo: str = "relatorio_mensal.xlsx"):
-    # BLINDADO: Puxa apenas os gastos do chat que pediu o relatório
     gastos = db.query(Transacao).filter(Transacao.chat_id == chat_id).all()
     
     if not gastos:

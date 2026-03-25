@@ -1,6 +1,10 @@
 from sqlalchemy import Column, Integer, Float, String, DateTime, BigInteger
 from datetime import datetime
 from src.database.database import Base, engine
+from datetime import timedelta
+
+def obter_hora_brasilia():
+    return datetime.utcnow() - timedelta(hours=3)
 
 class Transacao(Base):
     __tablename__ = 'transacoes'
@@ -10,9 +14,9 @@ class Transacao(Base):
     valor = Column(Float, nullable=False)
     categoria = Column(String, nullable=False, index=True) 
     descricao = Column(String, nullable=False)             
-    data = Column(DateTime, default=datetime.utcnow)
+    data = Column(DateTime, default=obter_hora_brasilia)
     tipo = Column(String)
-
+    
 class Renda(Base):
     __tablename__ = 'rendas'
 
