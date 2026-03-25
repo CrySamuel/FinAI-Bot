@@ -390,29 +390,46 @@ async def comando_apagar(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db.close()
 
 async def comando_analise(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id 
+    chat_id = update.effective_chat.id
+    
+    # Importamos a conexão e a função correta
+    from src.database.database import SessionLocal
+    from src.database.crud import obter_analise_categorias
     
     db = SessionLocal()
-    categorias = obter_analise_categorias(db, chat_id) 
-    resumo = obter_resumo_mes(db, chat_id)
-    db.close()
-    
-    total_gasto = resumo["despesas"]
-    
-    if total_gasto == 0 or not categorias:
-        await update.message.reply_text("📉 Nenhum gasto registrado para analisar.")
-        return
+    try:
+        gastos = obter_analise_categorias(db, chat_id)
         
-    mensagem = "📊 *Análise de Gastos (Porcentagem)* 📊\n\n"
-    
-    categorias_ordenadas = sorted(categorias, key=lambda x: x['total'], reverse=True)
-    
-    for cat in categorias_ordenadas:
-        porcentagem = (cat['total'] / total_gasto) * 100
-        valor_fmt = f"{cat['total']:.2f}".replace('.', ',')
-        mensagem += f"🔸 *{cat['categoria']}*: {porcentagem:.1f}% (R$ {valor_fmt})\n"
+        if not gastos:
+            await update.message.reply_text("📊 Ainda não existem despesas registradas para análise.")
+            return
+
+        total_gastos = sum(item["total"] for item in gastos)
         
-    await update.message.reply_text(mensagem, parse_mode='Markdown')
+        texto_analise = "📊 *Análise de Gastos por Categoria*\n━━━━━━━━━━━━━━━━\n"
+        
+        for item in gastos:
+            categoria = item["categoria"]
+            valor = item["total"]
+            
+            percentual = (valor / total_gastos) * 100
+            valor_formatado = f"{valor:.2f}".replace('.', ',')
+            
+            tamanho_barra = int(percentual / 10)
+            barra = "🟩" * tamanho_barra + "⬜" * (10 - tamanho_barra)
+            
+            texto_analise += f"*{categoria}* - {percentual:.1f}%\n"
+            texto_analise += f"{barra} R$ {valor_formatado}\n\n"
+        
+        texto_analise += "━━━━━━━━━━━━━━━━\n"
+        texto_analise += f"🔴 *Total Gasto:* R$ {f'{total_gastos:.2f}'.replace('.', ',')}"
+        
+        await update.message.reply_text(texto_analise, parse_mode="Markdown")
+        
+    except Exception as e:
+        await update.message.reply_text(f"❌ Erro ao gerar análise: {e}")
+    finally:
+        db.close()
 
 async def comando_filtro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id # <-- IDENTIDADE CAPTURADA
