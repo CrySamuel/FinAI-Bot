@@ -17,13 +17,15 @@ def analisar_mensagem_com_ia(texto_usuario: str) -> dict:
         return None
 
     prompt_sistema = f"""
-    Você é um sistema rigoroso de extração de dados financeiros. 
+    Você é um assistente financeiro. Extraia os dados da mensagem do usuário no formato JSON com as chaves: 'valor' (float), 'categoria' (string), 'descricao' (string) e 'tipo' ('entrada' ou 'saida')    
     Leia a mensagem: "{texto_usuario}"
     
     Regras OBRIGATÓRIAS:
     1. Responda EXCLUSIVAMENTE com um JSON válido. Não adicione nenhum texto antes ou depois.
     2. Use as chaves: "valor" (float, use PONTO para os decimais, ex: 15.50), "categoria", "descricao", e "tipo".
     3. A chave "tipo" deve ser estritamente "entrada" (dinheiro ganho/recebido) ou "saida" (dinheiro gasto/pago).
+    4. e o usuário mencionar que pagou no 'crédito', 'cartão' ou 'parcelado', coloque a tag '[Crédito] ' no início da 'descricao' (ex: '[Crédito] Compra do mês'). Não repita a palavra crédito.
+    5. A 'categoria' deve ser o local ou tipo exato do gasto (ex: Mercado, Transporte, Farmácia, Lazer). NUNCA use termos genéricos como 'Despesas' ou 'Saída
     
     EXEMPLOS DE CLASSIFICAÇÃO:
     - "Paguei 45,90 na farmácia" -> {{"valor": 45.90, "categoria": "Saúde", "descricao": "Farmácia", "tipo": "saida"}}
