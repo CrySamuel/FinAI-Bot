@@ -119,6 +119,9 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await mensagem_espera.edit_text("❌ Não entendi. Pode reformular?")
 
 async def comando_renda(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # 1. Prepara o texto e os botões
+    texto = "💸 *Nova Renda!*\nQual é a origem desse dinheiro?"
+
     teclado = [
         [InlineKeyboardButton("💵 Salário", callback_data="Salário")],
         [InlineKeyboardButton("💸 Adiantamento/Vale", callback_data="Adiantamento")],
@@ -127,13 +130,15 @@ async def comando_renda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("❌ Cancelar", callback_data="Cancelar")]
     ]
     reply_markup = InlineKeyboardMarkup(teclado)
-    
-    await update.message.reply_text(
-        "O que você deseja cadastrar no seu orçamento?",
-        reply_markup=reply_markup
-    )
-    return ESCOLHER_TIPO
 
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(texto, parse_mode="Markdown", reply_markup=reply_markup) 
+    else:
+
+        await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=reply_markup) 
+        
+    return ESCOLHER_TIPO
 async def receber_tipo_renda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -162,7 +167,7 @@ async def receber_valor_renda(update: Update, context: ContextTypes.DEFAULT_TYPE
         return DIGITAR_VALOR
 
 async def receber_dia_renda(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id # <-- IDENTIDADE CAPTURADA
+    chat_id = update.effective_chat.id 
     texto_dia = update.message.text
     try:
         dia = int(texto_dia)
@@ -172,7 +177,6 @@ async def receber_dia_renda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         categoria_tipo = "beneficio" if tipo in ["VR", "VT"] else "dinheiro"
         
         db = SessionLocal()
-        # Passando o chat_id na criação da renda mensal
         criar_renda(db, descricao=tipo, valor=valor, dia_recebimento=dia, chat_id=chat_id, tipo=categoria_tipo)
         db.close()
         
@@ -192,14 +196,14 @@ async def cancelar_conversa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def comando_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id # <-- IDENTIDADE CAPTURADA
+    chat_id = update.effective_chat.id 
     db = SessionLocal()
     resumo = obter_resumo_mes(db, chat_id)
     db.close()
 
     receitas = resumo["receitas"]
     despesas = resumo["despesas"]
-    saldo = receitas - despesas # <-- CÁLCULO CORRIGIDO!
+    saldo = receitas - despesas 
 
     rec_fmt = f"{receitas:.2f}".replace('.', ',')
     desp_fmt = f"{despesas:.2f}".replace('.', ',')
@@ -369,7 +373,10 @@ def setup_handlers(app):
     app.add_handler(CallbackQueryHandler(processar_cliques_menu, pattern="^btn_"))
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('renda', comando_renda)],
+        entry_points=[
+            CommandHandler('renda', comando_renda),
+            CallbackQueryHandler(comando_renda, pattern="^renda_start$") # <-- A CONEXÃO ACONTECE AQUI!
+        ],
         states={
             ESCOLHER_TIPO: [CallbackQueryHandler(receber_tipo_renda)],
             DIGITAR_VALOR: [MessageHandler(filters.TEXT & ~filters.COMMAND, receber_valor_renda)],

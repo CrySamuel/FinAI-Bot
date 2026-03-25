@@ -74,11 +74,9 @@ def gerar_relatorio_excel(db: Session, chat_id: int, caminho_arquivo: str = "rel
     return True
 
 def listar_ultimas_transacoes(db: Session, chat_id: int, limite: int = 5):
-    # BLINDADO
     return db.query(Transacao).filter(Transacao.chat_id == chat_id).order_by(Transacao.data.desc()).limit(limite).all()
 
 def apagar_transacao(db: Session, transacao_id: int, chat_id: int):
-    # SEGURANÇA: Só acha a transação se ela pertencer ao mesmo chat que pediu para apagar
     transacao = db.query(Transacao).filter(
         Transacao.id == transacao_id, 
         Transacao.chat_id == chat_id
