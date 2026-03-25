@@ -291,6 +291,7 @@ async def comando_transacoes(update: Update, context: ContextTypes.DEFAULT_TYPE)
         for s in saidas:
             data_transacao = s.data.date() if getattr(s, 'data', None) else hoje
             movimentacoes.append({
+                "id_exibicao": f"G{s.id}",
                 "tipo": "saida",
                 "valor": s.valor,
                 "categoria": s.categoria,
@@ -305,6 +306,7 @@ async def comando_transacoes(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 data_renda = hoje
                 
             movimentacoes.append({
+                "id_exibicao": f"R{e.id}",
                 "tipo": "entrada",
                 "valor": e.valor,
                 "categoria": "Receita",
@@ -323,7 +325,7 @@ async def comando_transacoes(update: Update, context: ContextTypes.DEFAULT_TYPE)
             data_formatada = m["data"].strftime("%d/%m")
             valor_formatado = f"{m['valor']:.2f}".replace('.', ',')
             
-            texto += f"{icone} *{data_formatada}* | {m['categoria']}\n"
+            texto += f"{icone} *{data_formatada}* | {m['categoria']} [ID: {m['id_exibicao']}]\n"
             texto += f"    └ R$ {valor_formatado} ({m['descricao']})\n\n"
             
         await update.message.reply_text(texto, parse_mode="Markdown")
@@ -351,25 +353,41 @@ async def comando_ultimos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(mensagem, parse_mode='Markdown')
 
 async def comando_apagar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id # <-- IDENTIDADE CAPTURADA
-    if not context.args:
-        await update.message.reply_text("⚠️ Por favor, informe o ID do gasto. Exemplo: /apagar 3")
-        return
-
     try:
-        id_para_apagar = int(context.args[0])
-        
+        argumento = context.args[0].lower() 
+        chat_id = update.effective_chat.id
         db = SessionLocal()
-        sucesso = apagar_transacao(db, id_para_apagar, chat_id)
-        db.close()
-
-        if sucesso:
-            await update.message.reply_text(f"🗑️ O registro de ID {id_para_apagar} foi apagado com sucesso!")
+        
+        tipo = argumento[0]
+        id_item = int(argumento[1:])
+        
+        if tipo == 'g':
+            from src.database.models import Transacao
+            item = db.query(Transacao).filter(Transacao.id == id_item, Transacao.chat_id == chat_id).first()
+            if item:
+                db.delete(item)
+                db.commit()
+                await update.message.reply_text(f"🗑️ Gasto apagado com sucesso!")
+            else:
+                await update.message.reply_text("❌ Gasto não encontrado. Verifique o ID no /transacoes.")
+                
+        elif tipo == 'r':
+            from src.database.models import Renda
+            item = db.query(Renda).filter(Renda.id == id_item, Renda.chat_id == chat_id).first()
+            if item:
+                db.delete(item)
+                db.commit()
+                await update.message.reply_text(f"🗑️ Renda apagada com sucesso!")
+            else:
+                await update.message.reply_text("❌ Renda não encontrada. Verifique o ID no /transacoes.")
         else:
-            await update.message.reply_text(f"❌ Não encontrei nenhum gasto com o ID {id_para_apagar}.")
+            await update.message.reply_text("❌ Formato inválido. Use /apagar g4 (para gasto) ou /apagar r4 (para renda).")
             
-    except ValueError:
-        await update.message.reply_text("⚠️ O ID precisa ser um número. Exemplo: /apagar 3")
+    except (IndexError, ValueError):
+        await update.message.reply_text("❌ Como usar o comando:\nPara apagar um gasto: /apagar g4\nPara apagar uma renda: /apagar r4\n\n(Você pode ver os IDs no comando /transacoes)")
+    finally:
+        if 'db' in locals():
+            db.close()
 
 async def comando_analise(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id 
