@@ -4,7 +4,7 @@ from telegram.ext import (
     ConversationHandler, CallbackQueryHandler
 )
 
-import os
+import os, re
 from src.ai.processor import analisar_mensagem_com_ia
 from src.database.database import SessionLocal
 from src.database.crud import (
@@ -139,6 +139,7 @@ async def comando_renda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=reply_markup) 
         
     return ESCOLHER_TIPO
+
 async def receber_tipo_renda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -157,40 +158,62 @@ async def receber_tipo_renda(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def receber_valor_renda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto_valor = update.message.text
     try:
-        valor = float(texto_valor.replace(',', '.'))
+        texto_limpo = texto_valor.replace(".", "")
+        texto_limpo = texto_limpo.replace(",", ".")
+        
+        valor = float(texto_limpo)
         context.user_data['valor_renda'] = valor
         
         await update.message.reply_text("Entendido. E em qual dia do mês ele costuma cair na conta? (Ex: 5, 20)")
         return DIGITAR_DIA
+        
     except ValueError:
-        await update.message.reply_text("Valor inválido. Digite apenas números (ex: 1500.50):")
+        await update.message.reply_text("❌ Valor inválido. Digite apenas números (ex: 1500,50 ou 1.500,50):")
         return DIGITAR_VALOR
 
 async def receber_dia_renda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id 
     texto_dia = update.message.text
-    try:
-        dia = int(texto_dia)
-        tipo = context.user_data['tipo_renda']
-        valor = context.user_data['valor_renda']
-        
-        categoria_tipo = "beneficio" if tipo in ["VR", "VT"] else "dinheiro"
-        
-        db = SessionLocal()
-        criar_renda(db, descricao=tipo, valor=valor, dia_recebimento=dia, chat_id=chat_id, tipo=categoria_tipo)
-        db.close()
-        
-        await update.message.reply_text(
-            f"✅ Renda salva com sucesso!\n"
-            f"🏷️ Tipo: {tipo}\n"
-            f"💰 Valor: R$ {valor:.2f}\n"
-            f"📅 Dia de recebimento: {dia}"
-        )
-        return ConversationHandler.END
-    except ValueError:
-        await update.message.reply_text("Dia inválido. Digite apenas o número do dia (ex: 5):")
-        return DIGITAR_DIA
 
+    numero_encontrado = re.search(r'\d+', texto_dia)
+    
+    if numero_encontrado:
+        dia = int(numero_encontrado.group())
+
+        if 1 <= dia <= 31:
+            context.user_data['dia_renda'] = dia
+            
+            tipo = context.user_data['tipo_renda']
+            valor = context.user_data['valor_renda']
+            
+            categoria_tipo = "beneficio" if tipo in ["VR", "VT"] else "dinheiro"
+            
+            try:
+                db = SessionLocal()
+                criar_renda(db, descricao=tipo, valor=valor, dia_recebimento=dia, chat_id=chat_id, tipo=categoria_tipo)
+                db.close()
+                
+                valor_formatado = f"{valor:.2f}".replace('.', ',')
+                
+                await update.message.reply_text(
+                    f"✅ Renda salva com sucesso!\n"
+                    f"🏷️ Tipo: {tipo}\n"
+                    f"💰 Valor: R$ {valor_formatado}\n"
+                    f"📅 Dia de recebimento: {dia}"
+                )
+                return ConversationHandler.END
+            except Exception as e:
+                await update.message.reply_text(f"❌ Erro ao salvar no banco: {e}")
+                return ConversationHandler.END
+                
+        else:
+            await update.message.reply_text("❌ Dia inválido. Por favor, digite um dia do mês válido entre 1 e 31:")
+            return DIGITAR_DIA
+            
+    else:
+        await update.message.reply_text("❌ Não encontrei nenhum número. Digite o dia do recebimento (ex: 5, dia 20):")
+        return DIGITAR_DIA
+    
 async def cancelar_conversa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Cadastro cancelado.")
     return ConversationHandler.END
