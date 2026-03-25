@@ -14,6 +14,7 @@ from src.database.crud import (
 )
 
 from datetime import datetime
+from telegram import constants
 
 ESCOLHER_TIPO, DIGITAR_VALOR, DIGITAR_DIA = range(3)
 
@@ -42,7 +43,8 @@ async def comando_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(mensagem, parse_mode='Markdown')
 
 async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id # <-- IDENTIDADE CAPTURADA
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=constants.ChatAction.TYPING)
+    chat_id = update.effective_chat.id 
     texto_recebido = update.message.text
     mensagem_espera = await update.message.reply_text("Processando... 🧠")
     
@@ -90,8 +92,8 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 )
                 
             db.close()
-            await mensagem_espera.edit_text(resposta, parse_mode='Markdown')
-            
+            await mensagem_espera.edit_text(f"✅ Gasto salvo! Categoria: {dados_extraidos['categoria']}")            
+        
         except Exception as e:
             await mensagem_espera.edit_text(f"❌ Erro ao salvar: {e}")
     else:
@@ -334,11 +336,13 @@ def setup_handlers(app):
     app.add_handler(CommandHandler("start", comando_start))
     app.add_handler(CommandHandler("comandos", comando_comandos))
     app.add_handler(CommandHandler("saldo", comando_saldo))
-    app.add_handler(CommandHandler("relatorio", comando_relatorio))
-    app.add_handler(CommandHandler("ultimos", comando_ultimos))
-    app.add_handler(CommandHandler("transacoes", comando_transacoe))
+    
+    app.add_handler(CommandHandler(["relatorio", "relatório"], comando_relatorio))
+    app.add_handler(CommandHandler(["ultimos", "últimos"], comando_ultimos))
+    app.add_handler(CommandHandler(["transacoes", "transações"], comando_transacoe))
+    app.add_handler(CommandHandler(["analise", "análise"], comando_analise))
+    
     app.add_handler(CommandHandler("apagar", comando_apagar))
-    app.add_handler(CommandHandler("analise", comando_analise))
     app.add_handler(CommandHandler("filtro", comando_filtro))
     
     conv_handler = ConversationHandler(
@@ -352,5 +356,4 @@ def setup_handlers(app):
     )
     
     app.add_handler(conv_handler)
-    
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, processar_mensagem))    
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, processar_mensagem))
