@@ -290,7 +290,7 @@ async def comando_transacoes(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     try:
         from src.database.models import Transacao, Renda
-        from datetime import date
+        from datetime import date, datetime
         
         saidas = db.query(Transacao).filter(Transacao.chat_id == chat_id).all()
         entradas = db.query(Renda).filter(Renda.chat_id == chat_id).all()
@@ -303,37 +303,29 @@ async def comando_transacoes(update: Update, context: ContextTypes.DEFAULT_TYPE)
         hoje = date.today()
         
         for s in saidas:
-            data_transacao = s.data.date() if getattr(s, 'data', None) else hoje
+            data_obj = s.data if s.data else datetime.combine(hoje, datetime.min.time())
             movimentacoes.append({
-                "id_exibicao": f"G{s.id}",
-                "tipo": "saida",
-                "valor": s.valor,
-                "categoria": s.categoria,
-                "descricao": s.descricao,
-                "data": data_transacao
+                "id_exibicao": f"G{s.id}", "tipo": "saida", "valor": s.valor,
+                "categoria": s.categoria, "descricao": s.descricao, "data": data_obj, "id_num": s.id
             })
             
         for e in entradas:
             try:
-                data_renda = date(hoje.year, hoje.month, int(e.dia_recebimento))
-            except (ValueError, TypeError):
-                data_renda = hoje
+                data_obj = datetime(hoje.year, hoje.month, int(e.dia_recebimento))
+            except:
+                data_obj = datetime.combine(hoje, datetime.min.time())
                 
             movimentacoes.append({
-                "id_exibicao": f"R{e.id}",
-                "tipo": "entrada",
-                "valor": e.valor,
-                "categoria": "Receita",
-                "descricao": e.descricao,
-                "data": data_renda
+                "id_exibicao": f"R{e.id}", "tipo": "entrada", "valor": e.valor,
+                "categoria": "Receita", "descricao": e.descricao, "data": data_obj, "id_num": e.id
             })
             
-        movimentacoes.sort(key=lambda x: x["data"], reverse=True)
+        # Ordenação blindada
+        movimentacoes.sort(key=lambda x: (x["data"], 1 if x["tipo"] == "entrada" else 0, x["id_num"]), reverse=True)
         
         ultimas_movimentacoes = movimentacoes[:15]
         
         texto = "📋 *Extrato de Transações*\n━━━━━━━━━━━━━━━━\n"
-        
         for m in ultimas_movimentacoes:
             icone = "🔴" if m["tipo"] == "saida" else "🟢"
             data_formatada = m["data"].strftime("%d/%m")
@@ -352,19 +344,47 @@ async def comando_transacoes(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def comando_ultimos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id 
     db = SessionLocal()
-    ultimos = listar_ultimas_transacoes(db, chat_id)
-    db.close()
 
-    if not ultimos:
-        await update.message.reply_text("Nenhum gasto registrado ainda.")
-        return
+    try:
+        from src.database.models import Transacao, Renda
+        from datetime import date, datetime
+        
+        saidas = db.query(Transacao).filter(Transacao.chat_id == chat_id).order_by(Transacao.id.desc()).limit(5).all()
+        entradas = db.query(Renda).filter(Renda.chat_id == chat_id).order_by(Renda.id.desc()).limit(5).all()
 
-    mensagem = "🕒 *Últimos 5 registros:*\n\n"
-    for g in ultimos:
-        data_formatada = g.data.strftime("%d/%m %H:%M")
-        mensagem += f"🔹 *ID {g.id}* | {data_formatada}\n{g.categoria}: {g.descricao} - R$ {g.valor:.2f}\n\n"
+        if not saidas and not entradas:
+            await update.message.reply_text("Nenhum registro encontrado ainda.")
+            return
 
-    await update.message.reply_text(mensagem, parse_mode='Markdown')
+        movimentacoes = []
+        hoje = date.today()
+
+        for s in saidas:
+            data_obj = s.data if s.data else datetime.combine(hoje, datetime.min.time())
+            movimentacoes.append({"id_exibicao": f"G{s.id}", "tipo": "saida", "valor": s.valor, "categoria": s.categoria, "descricao": s.descricao, "data": data_obj, "id_num": s.id})
+
+        for e in entradas:
+            try:
+                data_obj = datetime(hoje.year, hoje.month, int(e.dia_recebimento))
+            except:
+                data_obj = datetime.combine(hoje, datetime.min.time())
+            movimentacoes.append({"id_exibicao": f"R{e.id}", "tipo": "entrada", "valor": e.valor, "categoria": "Receita", "descricao": e.descricao, "data": data_obj, "id_num": e.id})
+
+        movimentacoes.sort(key=lambda x: (x["data"], 1 if x["tipo"] == "entrada" else 0, x["id_num"]), reverse=True)
+
+        ultimos = movimentacoes[:5]
+
+        mensagem = "🕒 *Últimos 5 registros:*\n\n"
+        for m in ultimos:
+            data_formatada = m["data"].strftime("%d/%m")
+            mensagem += f"🔹 *ID {m['id_exibicao']}* | {data_formatada}\n{m['categoria']}: {m['descricao']} - R$ {m['valor']:.2f}\n\n"
+
+        await update.message.reply_text(mensagem, parse_mode='Markdown')
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Erro: {e}")
+    finally:
+        db.close()
 
 async def comando_apagar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -498,6 +518,62 @@ async def comando_definir_meta(update: Update, context: ContextTypes.DEFAULT_TYP
     except (IndexError, ValueError):
         await update.message.reply_text("❌ Use: `/meta Categoria Valor` (Ex: `/meta Lazer 500`)", parse_mode="Markdown")
 
+async def comando_metas(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    from src.database.database import SessionLocal
+    
+    db = SessionLocal()
+    try:
+        from src.database.crud import listar_metas, verificar_meta_categoria
+        
+        metas_cadastradas = listar_metas(db, chat_id)
+        
+        if not metas_cadastradas:
+            await update.message.reply_text(
+                "📭 *Nenhuma meta definida ainda.*\n"
+                "Use `/meta Categoria Valor` (Ex: `/meta Lazer 100`) para começar a controlar seu orçamento!", 
+                parse_mode="Markdown"
+            )
+            return
+
+        mensagem = "🎯 *Suas Metas do Mês*\n━━━━━━━━━━━━━━━━\n"
+        
+        for meta in metas_cadastradas:
+            info = verificar_meta_categoria(db, chat_id, meta.categoria)
+            
+            if info:
+                percentual = info['percentual']
+                gasto_fmt = f"{info['gasto']:.2f}".replace('.', ',')
+                limite_fmt = f"{info['limite']:.2f}".replace('.', ',')
+                restante_fmt = f"{abs(info['restante']):.2f}".replace('.', ',')
+                
+                tamanho_barra = min(int(percentual / 10), 10)
+                
+                if percentual > 100:
+                    barra = "🟥" * 10
+                    icone = "🚨"
+                    status_sobra = f"🛑 *Estourou R$ {restante_fmt}*"
+                elif percentual >= 80:
+                    barra = "🟧" * tamanho_barra + "⬜" * (10 - tamanho_barra)
+                    icone = "⚠️"
+                    status_sobra = f"🟡 *Cuidado! Sobra R$ {restante_fmt}*"
+                else:
+                    barra = "🟩" * tamanho_barra + "⬜" * (10 - tamanho_barra)
+                    icone = "✅"
+                    status_sobra = f"🟢 *Livre: R$ {restante_fmt}*"
+                
+                mensagem += f"{icone} *{meta.categoria}* ({percentual:.1f}%)\n"
+                mensagem += f"{barra}\n"
+                mensagem += f"💰 R$ {gasto_fmt} / R$ {limite_fmt}\n"
+                mensagem += f"↳ {status_sobra}\n\n"
+
+        await update.message.reply_text(mensagem, parse_mode="Markdown")
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Erro ao buscar metas: {e}")
+    finally:
+        db.close()
+
 def setup_handlers(app):
     app.add_handler(CommandHandler("menu", comando_menu))
     
@@ -515,6 +591,7 @@ def setup_handlers(app):
     
     app.add_handler(CallbackQueryHandler(processar_cliques_menu, pattern="^btn_"))
     app.add_handler(CommandHandler("meta", comando_definir_meta))
+    app.add_handler(CommandHandler("metas", comando_metas))
 
     conv_handler = ConversationHandler(
         entry_points=[

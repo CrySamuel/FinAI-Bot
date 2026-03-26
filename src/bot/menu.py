@@ -2,7 +2,10 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from src.database.database import SessionLocal
-from src.database.crud import obter_resumo_mes, listar_ultimas_transacoes, obter_analise_categorias
+from src.database.crud import (
+    obter_resumo_mes, listar_ultimas_transacoes, 
+    obter_analise_categorias, listar_metas, verificar_meta_categoria,
+    )
 
 import io
 import pandas as pd
@@ -12,18 +15,15 @@ from src.database.models import Transacao
 async def comando_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     teclado = [
-        [
-            InlineKeyboardButton("💰 Ver Saldo", callback_data="btn_saldo"),
-            InlineKeyboardButton("📊 Análise", callback_data="btn_analise")
-        ],
-        [
-            InlineKeyboardButton("🔍 Últimos", callback_data="btn_ultimos"),
-            InlineKeyboardButton("📁 Relatório", callback_data="btn_relatorio")
-        ],
-        [
-            InlineKeyboardButton("➕ Adicionar Renda", callback_data="renda_start")
+            [InlineKeyboardButton("💸 Nova Renda", callback_data="renda_start"),
+            InlineKeyboardButton("📊 Saldo", callback_data="btn_saldo")], # Lado a lado
+            
+            [InlineKeyboardButton("📋 Extrato", callback_data="btn_extrato"),
+            InlineKeyboardButton("📈 Categorias", callback_data="btn_analise")], # Lado a lado
+            
+            [InlineKeyboardButton("🎯 Minhas Metas", callback_data="btn_metas")],
+            [InlineKeyboardButton("📁 Relatório Excel", callback_data="btn_relatorio")]
         ]
-    ]
     
     reply_markup = InlineKeyboardMarkup(teclado)
     
@@ -108,35 +108,37 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
         finally:
             db.close()
 
-    elif escolha == "btn_ultimos":
+    elif escolha == "btn_extrato":
         db = SessionLocal()
         try:
             from src.database.models import Transacao, Renda
+            from datetime import date, datetime
             
-            saidas = db.query(Transacao).filter(Transacao.chat_id == chat_id).order_by(Transacao.id.desc()).limit(5).all()
+            saidas = db.query(Transacao).filter(Transacao.chat_id == chat_id).order_by(Transacao.id.desc()).limit(10).all()
             entradas = db.query(Renda).filter(Renda.chat_id == chat_id).order_by(Renda.id.desc()).limit(5).all()
             
             movimentacoes = []
+            hoje = date.today()
             
             for s in saidas:
+                data_obj = s.data if s.data else datetime.combine(hoje, datetime.min.time())
                 movimentacoes.append({
-                    "tipo": "saida",
-                    "valor": s.valor,
-                    "categoria": s.categoria,
-                    "descricao": s.descricao,
-                    "data": getattr(s, 'data', None)
+                    "tipo": "saida", "valor": s.valor, "categoria": s.categoria, 
+                    "descricao": s.descricao, "data": data_obj, "id_num": s.id
                 })
                 
             for e in entradas:
+                try:
+                    data_obj = datetime(hoje.year, hoje.month, int(e.dia_recebimento))
+                except:
+                    data_obj = datetime.combine(hoje, datetime.min.time())
+                    
                 movimentacoes.append({
-                    "tipo": "entrada",
-                    "valor": e.valor,
-                    "categoria": "Receita/Renda", 
-                    "descricao": e.descricao,
-                    "data": getattr(e, 'data', None)
+                    "tipo": "entrada", "valor": e.valor, "categoria": "Receita/Renda", 
+                    "descricao": e.descricao, "data": data_obj, "id_num": e.id
                 })
                 
-            movimentacoes.sort(key=lambda x: x["data"].timestamp() if x["data"] else 0, reverse=True)
+            movimentacoes.sort(key=lambda x: (x["data"], 1 if x["tipo"] == "entrada" else 0, x["id_num"]), reverse=True)
             
             ultimas = movimentacoes[:5]
             
@@ -146,25 +148,22 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
                 texto_ultimos = "🔍 *Últimas 5 Movimentações*\n━━━━━━━━━━━━━━━━\n"
                 for m in ultimas:
                     icone = "🔴" if m["tipo"] == "saida" else "🟢"
-                    data_formatada = m["data"].strftime("%d/%m") if m["data"] else "N/D"
+                    data_formatada = m["data"].strftime("%d/%m")
                     valor_formatado = f"{m['valor']:.2f}".replace('.', ',')
                     
                     texto_ultimos += f"{icone} *{data_formatada}* | {m['categoria']}\n"
                     texto_ultimos += f"    └ R$ {valor_formatado} ({m['descricao']})\n\n"
                     
             teclado_voltar = [[InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="btn_voltar")]]
-            reply_markup = InlineKeyboardMarkup(teclado_voltar)
-            
-            await query.edit_message_text(texto_ultimos, parse_mode="Markdown", reply_markup=reply_markup)
+            await query.edit_message_text(texto_ultimos, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(teclado_voltar))
             
         except Exception as e:
-            await query.edit_message_text(f"❌ Erro ao buscar últimas movimentações: {e}")
+            await query.edit_message_text(f"❌ Erro ao buscar extrato: {e}")
         finally:
             db.close()
 
     elif escolha == "btn_relatorio":
         teclado_datas = [
-            # Colocamos o prefixo "btn_" em todos eles
             [InlineKeyboardButton("📅 Últimos 7 Dias", callback_data="btn_rel_7")],
             [InlineKeyboardButton("📅 Último Mês", callback_data="btn_rel_30")],
             [InlineKeyboardButton("📅 Últimos 3 Meses", callback_data="btn_rel_90")],
@@ -326,23 +325,7 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
 
             buffer.seek(0)
             
-            # Envio do Documento
-            nome_periodo = escolha.replace("btn_rel_", "")
-            arquivo_nome = f"Relatorio_FinAI_{nome_periodo}dias.xlsx" if nome_periodo != "tudo" else "Relatorio_FinAI_Completo.xlsx"
-            
-            await context.bot.send_document(
-                chat_id=chat_id,
-                document=buffer,
-                filename=arquivo_nome,
-                caption="✅ *Seu relatório está pronto!*",
-                parse_mode="Markdown"
-            )
-            
-            teclado_voltar = [[InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="btn_voltar")]]
-            await query.edit_message_text("📈 Relatório enviado com sucesso!", reply_markup=InlineKeyboardMarkup(teclado_voltar))
-
-            buffer.seek(0)
-            
+            # Envio Único do Documento
             nome_periodo = escolha.replace("btn_rel_", "")
             arquivo_nome = f"Relatorio_FinAI_{nome_periodo}dias.xlsx" if nome_periodo != "tudo" else "Relatorio_FinAI_Completo.xlsx"
             
@@ -362,5 +345,56 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
         finally:
             db.close()
 
-    elif escolha == "btn_renda":
-        await query.message.reply_text("Para adicionar renda, por favor digite o comando /renda")
+    elif escolha == "btn_metas":
+        await query.edit_message_text("⏳ *Buscando suas metas...*", parse_mode="Markdown")
+        
+        db = SessionLocal()
+        try:
+            metas_cadastradas = listar_metas(db, chat_id)
+            
+            if not metas_cadastradas:
+                teclado_voltar = [[InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="btn_voltar")]]
+                await query.edit_message_text(
+                    "📭 *Nenhuma meta definida ainda.*\nUse o comando `/meta Categoria Valor` para criar.", 
+                    reply_markup=InlineKeyboardMarkup(teclado_voltar),
+                    parse_mode="Markdown"
+                )
+                return
+
+            mensagem = "🎯 *Suas Metas do Mês*\n━━━━━━━━━━━━━━━━\n"
+            
+            for meta in metas_cadastradas:
+                info = verificar_meta_categoria(db, chat_id, meta.categoria)
+                if info:
+                    percentual = info['percentual']
+                    gasto_fmt = f"{info['gasto']:.2f}".replace('.', ',')
+                    limite_fmt = f"{info['limite']:.2f}".replace('.', ',')
+                    restante_fmt = f"{abs(info['restante']):.2f}".replace('.', ',')
+                    
+                    tamanho_barra = min(int(percentual / 10), 10)
+                    
+                    if percentual > 100:
+                        barra = "🟥" * 10
+                        icone = "🚨"
+                        status_sobra = f"🛑 *Estourou R$ {restante_fmt}*"
+                    elif percentual >= 80:
+                        barra = "🟧" * tamanho_barra + "⬜" * (10 - tamanho_barra)
+                        icone = "⚠️"
+                        status_sobra = f"🟡 *Cuidado! Sobra R$ {restante_fmt}*"
+                    else:
+                        barra = "🟩" * tamanho_barra + "⬜" * (10 - tamanho_barra)
+                        icone = "✅"
+                        status_sobra = f"🟢 *Livre: R$ {restante_fmt}*"
+                    
+                    mensagem += f"{icone} *{meta.categoria}* ({percentual:.1f}%)\n"
+                    mensagem += f"{barra}\n"
+                    mensagem += f"💰 R$ {gasto_fmt} / R$ {limite_fmt}\n"
+                    mensagem += f"↳ {status_sobra}\n\n"
+
+            teclado_voltar = [[InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="btn_voltar")]]
+            await query.edit_message_text(mensagem, reply_markup=InlineKeyboardMarkup(teclado_voltar), parse_mode="Markdown")
+
+        except Exception as e:
+            await query.edit_message_text(f"❌ Erro ao buscar metas: {e}")
+        finally:
+            db.close()

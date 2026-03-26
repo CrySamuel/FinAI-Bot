@@ -74,7 +74,7 @@ def gerar_relatorio_excel(db: Session, chat_id: int, caminho_arquivo: str = "rel
     return True
 
 def listar_ultimas_transacoes(db: Session, chat_id: int, limite: int = 5):
-    return db.query(Transacao).filter(Transacao.chat_id == chat_id).order_by(Transacao.data.desc()).limit(limite).all()
+    return db.query(Transacao).filter(Transacao.chat_id == chat_id).order_by(Transacao.id.desc()).limit(limite).all()
 
 def apagar_transacao(db: Session, transacao_id: int, chat_id: int):
     transacao = db.query(Transacao).filter(
@@ -139,3 +139,7 @@ def verificar_meta_categoria(db: Session, chat_id: int, categoria: str):
         "restante": restante,
         "percentual": percentual
     }
+
+def listar_metas(db: Session, chat_id: int):
+    from src.database.models import Meta
+    return db.query(Meta).filter(Meta.chat_id == chat_id).all()
