@@ -7,9 +7,9 @@ from telegram.ext import (
 from src.database.crud import (
     verificar_meta_categoria, criar_transacao, criar_renda, 
     obter_resumo_mes, filtrar_gastos_por_termo, obter_analise_categorias, 
-    listar_metas
+    listar_metas, registrar_compra_parcelada
 )
-import os, re
+import re
 from src.database.models import Meta, Transacao, Renda
 from src.ai.processor import analisar_mensagem_com_ia
 from src.database.database import SessionLocal
@@ -44,6 +44,7 @@ async def comando_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💰 */transacoes* - Lista todos os gastos registrados.\n"
         "🍕 */analise* - Mostra a % de gastos por categoria.\n"
         "🔍 */filtro [termo]* - Mostra o total gasto em um local ou categoria específica.\n"
+        "💳 */novo_cartao* - Cadastra um novo cartão de crédito.\n"
     )
     await update.message.reply_text(mensagem, parse_mode='Markdown')
 
@@ -89,23 +90,48 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     f"📅 Data ref: {data_final.strftime('%d/%m/%Y')}"
                 )
             else:
-                criar_transacao(
-                    db=db, 
-                    valor=valor, 
-                    categoria=dados_extraidos["categoria"], 
-                    descricao=dados_extraidos["descricao"],
-                    tipo="saida",
-                    chat_id=chat_id,
-                    data=data_final 
-                )
+                metodo = dados_extraidos.get("metodo_pagamento", "debito")
+                parcelas = int(dados_extraidos.get("parcelas", 1))
+                nome_cartao = dados_extraidos.get("cartao")
+        
+                if metodo == "credito" and parcelas > 1 and nome_cartao:
+                    sucesso, msg_retorno = registrar_compra_parcelada(
+                        db=db,
+                        chat_id=chat_id,
+                        valor_total=valor,
+                        categoria=dados_extraidos.get("categoria", "Outros"),
+                        descricao=dados_extraidos["descricao"],
+                        cartao_nome=nome_cartao,
+                        parcelas=parcelas,
+                        data_compra=data_final
+                    )
+                    
+                    if sucesso:
+                        texto_gasto = f"💳 *Crédito Inteligente*\n{msg_retorno}"
+                    else:
+                        texto_gasto = f"⚠️ *Atenção:*\n{msg_retorno}"
+                else:
+                    criar_transacao(
+                        db=db, 
+                        valor=valor, 
+                        categoria=dados_extraidos["categoria"], 
+                        descricao=dados_extraidos["descricao"],
+                        tipo="saida",
+                        chat_id=chat_id,
+                        data=data_final 
+                    )
 
-                texto_gasto = (
-                    "✅ *Gasto registrado!*\n"
-                    f"🏷️ Categoria: {dados_extraidos['categoria']}\n"
-                    f"📝 Descrição: {dados_extraidos['descricao']}\n"
-                    f"💰 Valor: R$ {valor_formatado}\n"
-                    f"📅 Data: {data_final.strftime('%d/%m/%Y')}"
-                )
+                    texto_gasto = (
+                        "✅ *Gasto registrado!*\n"
+                        f"🏷️ Categoria: {dados_extraidos['categoria']}\n"
+                        f"📝 Descrição: {dados_extraidos['descricao']}\n"
+                        f"🏦 Método: {metodo.capitalize()}\n"
+                        f"💰 Valor: R$ {valor_formatado}\n"
+                        f"📅 Data: {data_final.strftime('%d/%m/%Y')}"
+                    )
+                    
+                    if parcelas > 1 and not nome_cartao:
+                        texto_gasto += "\n\n⚠️ *Aviso do FinAI:* Você mencionou parcelas, mas não disse de qual cartão. Para não bagunçar, registrei o valor total como gasto à vista!"
                                 
                 status_meta = ""
                 try:
@@ -544,6 +570,49 @@ async def comando_metas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         db.close()
 
+async def comando_novo_cartao(update, context):
+    try:
+        args = context.args
+        if len(args) < 3:
+            await update.message.reply_text(
+                "⚠️ *Uso correto:* `/novo_cartao Nome Fechamento Vencimento`\n"
+                "Exemplo: `/novo_cartao Nubank 10 20`", 
+                parse_mode="Markdown"
+            )
+            return
+
+        nome_cartao = args[0]
+        dia_fechamento = int(args[1])
+        dia_vencimento = int(args[2])
+        chat_id = update.effective_chat.id
+
+        from src.database.database import SessionLocal
+        from src.database.models import Cartao
+        
+        db = SessionLocal()
+        novo_cartao = Cartao(
+            chat_id=chat_id, 
+            nome=nome_cartao, 
+            dia_fechamento=dia_fechamento, 
+            dia_vencimento=dia_vencimento
+        )
+        db.add(novo_cartao)
+        db.commit()
+        db.close()
+
+        await update.message.reply_text(
+            f"💳 *Cartão Cadastrado com Sucesso!*\n\n"
+            f"🏦 Nome: {nome_cartao.capitalize()}\n"
+            f"🔒 Fechamento: Dia {dia_fechamento}\n"
+            f"📅 Vencimento: Dia {dia_vencimento}",
+            parse_mode="Markdown"
+        )
+
+    except ValueError:
+        await update.message.reply_text("❌ Erro: Os dias de fechamento e vencimento precisam ser números!")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Erro interno: {e}")
+
 def setup_handlers(app):
     app.add_handler(CommandHandler("menu", comando_menu))
     
@@ -558,6 +627,7 @@ def setup_handlers(app):
     
     app.add_handler(CommandHandler("apagar", comando_apagar))
     app.add_handler(CommandHandler("filtro", comando_filtro))
+    app.add_handler(CommandHandler("novo_cartao", comando_novo_cartao))
     
     app.add_handler(CallbackQueryHandler(processar_cliques_menu, pattern="^btn_"))
     app.add_handler(CommandHandler("meta", comando_definir_meta))

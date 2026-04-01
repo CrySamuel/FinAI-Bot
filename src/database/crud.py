@@ -1,7 +1,9 @@
+import uuid
+import calendar
 from sqlalchemy.orm import Session
 from sqlalchemy import func, extract
 from datetime import datetime, date, timedelta
-from src.database.models import Transacao, Renda, Meta
+from src.database.models import Transacao, Renda, Meta, Cartao
 import pandas as pd
 
 def criar_transacao(db: Session, valor: float, categoria: str, descricao: str, tipo: str, chat_id: int, data: datetime = None):
@@ -39,10 +41,6 @@ def listar_rendas(db: Session, chat_id: int):
     return db.query(Renda).filter(Renda.chat_id == chat_id).all()
 
 def obter_resumo_mes(db: Session, chat_id: int):
-    from datetime import date
-    from sqlalchemy import func, extract
-    from src.database.models import Transacao, Renda
-    
     hoje = date.today()
     
     saidas_mes = db.query(func.sum(Transacao.valor)).filter(
@@ -61,8 +59,16 @@ def obter_resumo_mes(db: Session, chat_id: int):
     ).scalar() or 0.0
     receitas_mes_atual = entradas_fixas + entradas_pontuais_mes
 
-    todas_entradas_pontuais = db.query(func.sum(Transacao.valor)).filter(Transacao.tipo == "entrada", Transacao.chat_id == chat_id).scalar() or 0.0
-    todas_saidas = db.query(func.sum(Transacao.valor)).filter(Transacao.tipo == "saida", Transacao.chat_id == chat_id).scalar() or 0.0
+    todas_entradas_pontuais = db.query(func.sum(Transacao.valor)).filter(
+        Transacao.tipo == "entrada", 
+        Transacao.chat_id == chat_id
+    ).scalar() or 0.0
+    
+    todas_saidas = db.query(func.sum(Transacao.valor)).filter(
+        Transacao.tipo == "saida", 
+        Transacao.chat_id == chat_id,
+        Transacao.metodo_pagamento != "credito" 
+    ).scalar() or 0.0
     
     saldo_bancario = (entradas_fixas + todas_entradas_pontuais) - todas_saidas
     
@@ -171,5 +177,62 @@ def verificar_meta_categoria(db: Session, chat_id: int, categoria: str, data_ref
     }
 
 def listar_metas(db: Session, chat_id: int):
-    from src.database.models import Meta
     return db.query(Meta).filter(Meta.chat_id == chat_id).all()
+
+def calcular_meses_futuros(data_base, meses_a_adicionar):
+    """Função auxiliar para pular meses corretamente no calendário"""
+    mes = data_base.month - 1 + meses_a_adicionar
+    ano = data_base.year + mes // 12
+    mes = mes % 12 + 1
+    dia = data_base.day
+    max_dia = calendar.monthrange(ano, mes)[1]
+    return date(ano, mes, min(dia, max_dia))
+
+def registrar_compra_parcelada(db, chat_id, valor_total, categoria, descricao, cartao_nome, parcelas, data_compra):
+    """Gera a cascata de parcelas baseada no dia de fechamento do cartão"""
+    
+    # 1. Acha o cartão no banco
+    cartao = db.query(Cartao).filter(Cartao.chat_id == chat_id, Cartao.nome.ilike(cartao_nome)).first()
+    if not cartao:
+        return False, f"Cartão '{cartao_nome}' não encontrado. Cadastre-o primeiro!"
+
+    valor_parcela = valor_total / parcelas
+    id_compra = str(uuid.uuid4())[:8] # Gera um código tipo 'a1b2c3d4' para unir as parcelas
+
+    # 2. Lógica do Fechamento
+    # Se comprou no dia 12 e fecha dia 10, a primeira parcela já cai para o MÊS QUE VEM
+    meses_pulo = 0
+    if data_compra.day >= cartao.dia_fechamento:
+        meses_pulo = 1
+
+    transacoes_geradas = []
+    
+    # 3. O Loop das Parcelas
+    for i in range(parcelas):
+        numero_parcela = i + 1
+        
+        # Calcula em qual mês essa parcela vai cair
+        data_fatura_desta_parcela = calcular_meses_futuros(data_compra, meses_pulo + i)
+        
+        # Força a data para ser o dia do vencimento da fatura
+        data_cobranca = date(data_fatura_desta_parcela.year, data_fatura_desta_parcela.month, cartao.dia_vencimento)
+
+        nova_transacao = Transacao(
+            chat_id=chat_id,
+            valor=valor_parcela,
+            categoria=categoria,
+            descricao=f"{descricao} ({numero_parcela}/{parcelas})",
+            tipo="saida",
+            data=data_cobranca,
+            metodo_pagamento="credito",
+            cartao_id=cartao.id,
+            parcela_atual=numero_parcela,
+            total_parcelas=parcelas,
+            fatura_paga=False,
+            vinculo_compra=id_compra
+        )
+        db.add(nova_transacao)
+        transacoes_geradas.append(nova_transacao)
+
+    db.commit()
+    return True, f"✅ Compra de R$ {valor_total:.2f} dividida em {parcelas}x de R$ {valor_parcela:.2f} no cartão {cartao.nome.capitalize()}!"

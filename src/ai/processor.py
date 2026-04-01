@@ -20,30 +20,40 @@ def analisar_mensagem_com_ia(texto_usuario: str) -> dict:
     ]
 
     prompt_sistema = f"""
-    Você é um assistente financeiro. Hoje é dia {hoje_str}.
-    Extraia os dados da mensagem do usuário no formato JSON.
+    Você é um assistente financeiro rigoroso. Hoje é dia {hoje_str}.
+    Extraia os dados da mensagem do usuário e retorne EXCLUSIVAMENTE um formato JSON válido.
     
     REGRAS DE TEMPO:
     - ATENÇÃO: A data de HOJE é {hoje_str}.
-    - Se o usuário disser "ontem", calcule a data baseada em {hoje_str} (exemplo: se hoje é 01/04/2026, ontem foi 31/03/2026).
+    - Se o usuário disser "ontem", calcule a data baseada em {hoje_str}.
     - Retorne as datas SEMPRE no formato YYYY-MM-DD.
 
-    Regras OBRIGATÓRIAS:
-    1. Use EXATAMENTE as palavras do usuário para o campo "descricao".
-    2. Responda EXCLUSIVAMENTE com um JSON válido.
-    3. Use as chaves: "valor" (float, use PONTO para os decimais, ex: 15.50), "categoria", "descricao", "tipo" e "data".
-    4. A chave "tipo" deve ser estritamente "entrada" ou "saida".
-    5. Se o usuário mencionar que pagou no 'crédito', 'cartão' ou 'parcelado', coloque a tag '[Crédito] ' no início da 'descricao' (ex: '[Crédito] Compra do mês').
-    6. A 'categoria' DEVE OBRIGATORIAMENTE ser UMA destas opções exatas: {', '.join(categorias_permitidas)}. NUNCA invente uma categoria fora desta lista. Se houver dúvida, use "Outros".
-    7. Regra da DATA: Se o usuário mencionar uma data específica (ex: 'dia 20', 'ontem'), calcule e retorne a data exata no formato 'AAAA-MM-DD'. Se NÃO mencionar data, retorne '{hoje_str}'.
-    8. - NUNCA invente métodos de pagamento. Se o usuário disser "gastei com pneu", a descrição deve ser "Pneu". NUNCA adicione palavras como "Crédito", "Cartão", "Pix" se não estiverem no texto original.
+    REGRAS OBRIGATÓRIAS DE EXTRAÇÃO:
+    1. A 'categoria' DEVE OBRIGATORIAMENTE ser UMA destas opções exatas: {', '.join(categorias_permitidas)}. NUNCA invente categorias. Se houver dúvida, use "Outros".
+    2. A chave "tipo" deve ser estritamente "entrada" ou "saida".
+    3. Use EXATAMENTE as palavras do usuário para o campo "descricao". NUNCA invente métodos de pagamento (como "Crédito", "Cartão", "Pix") dentro da descrição se não estiverem no texto original.
+    4. A chave "metodo_pagamento" deve ser "credito", "pix" ou "debito". Se o usuário não especificar, assuma "debito".
+    5. A chave "parcelas" deve ser um número inteiro. Se disser "em X vezes", extraia o número X. Se for à vista ou não mencionado, o valor é 1.
+    6. A chave "cartao" deve conter apenas o nome do banco/cartão mencionado (ex: "Itaú", "Nubank"). Se não for mencionado, retorne null.
+    
+    ESTRUTURA JSON ESPERADA:
+    {{
+        "valor": float (use PONTO para decimais),
+        "categoria": "string",
+        "descricao": "string",
+        "tipo": "entrada" ou "saida",
+        "data": "YYYY-MM-DD",
+        "metodo_pagamento": "credito" | "pix" | "debito",
+        "parcelas": int,
+        "cartao": "string" ou null
+    }}
     
     EXEMPLOS DE CLASSIFICAÇÃO (Retorne APENAS o JSON e nada mais):
-    - "Paguei 45,90 na farmácia" -> {{"valor": 45.90, "categoria": "Saúde", "descricao": "Farmácia", "tipo": "saida", "data": "{hoje_str}"}}
-    - "Gastei 120 de gasolina ontem" -> {{"valor": 120.00, "categoria": "Transporte", "descricao": "Gasolina", "tipo": "saida", "data": "2024-03-24"}}
-    - "Ganhei 100 reais de um freela" -> {{"valor": 100.00, "categoria": "Renda Extra", "descricao": "Freela", "tipo": "entrada", "data": "{hoje_str}"}}
+    - "Paguei 45,90 na farmácia" -> {{"valor": 45.90, "categoria": "Saúde", "descricao": "farmácia", "tipo": "saida", "data": "{hoje_str}", "metodo_pagamento": "debito", "parcelas": 1, "cartao": null}}
+    - "Comprei um pneu de 600 reais em 6x no cartão Itaú dia 15" -> {{"valor": 600.00, "categoria": "Transporte", "descricao": "pneu", "tipo": "saida", "data": "2026-04-15", "metodo_pagamento": "credito", "parcelas": 6, "cartao": "Itaú"}}
+    - "Ganhei 100 reais de um freela no pix" -> {{"valor": 100.00, "categoria": "Renda Extra", "descricao": "freela", "tipo": "entrada", "data": "{hoje_str}", "metodo_pagamento": "pix", "parcelas": 1, "cartao": null}}
     """
-
+    
     url = "https://api.groq.com/openai/v1/chat/completions"
     
     headers = {
