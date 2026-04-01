@@ -1,9 +1,9 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func, extract
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from src.database.models import Transacao, Renda
 import pandas as pd
-from datetime import date
+import os
 
 def criar_transacao(db: Session, valor: float, categoria: str, descricao: str, tipo: str, chat_id: int, data: datetime = None):
     nova_transacao = Transacao(
@@ -55,8 +55,14 @@ def obter_resumo_mes(db: Session, chat_id: int):
     
     return {"despesas": saidas, "receitas": entradas}
 
-def gerar_relatorio_excel(db: Session, chat_id: int, caminho_arquivo: str = "relatorio_mensal.xlsx"):
-    gastos = db.query(Transacao).filter(Transacao.chat_id == chat_id).all()
+def gerar_relatorio_excel(db: Session, chat_id: int, dias: int = None, caminho_arquivo: str = "relatorio_mensal.xlsx"):
+    query = db.query(Transacao).filter(Transacao.chat_id == chat_id)
+    
+    if dias is not None:
+        data_limite = datetime.now() - timedelta(days=dias)
+        query = query.filter(Transacao.data >= data_limite)
+    
+    gastos = query.order_by(Transacao.data.desc()).all()
     
     if not gastos:
         return False 
@@ -69,7 +75,8 @@ def gerar_relatorio_excel(db: Session, chat_id: int, caminho_arquivo: str = "rel
             "Hora": g.data.strftime("%H:%M"),
             "Categoria": g.categoria,
             "Descrição": g.descricao,
-            "Valor (R$)": round(g.valor, 2)
+            "Valor (R$)": round(g.valor, 2),
+            "Tipo": g.tipo.capitalize()
         })
         
     df = pd.DataFrame(dados)

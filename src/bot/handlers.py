@@ -1,24 +1,21 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, constants
 from telegram.ext import (
     ContextTypes, CommandHandler, MessageHandler, filters, 
     ConversationHandler, CallbackQueryHandler
 )
 
-from src.database.crud import verificar_meta_categoria
+from src.database.crud import (
+    verificar_meta_categoria, criar_transacao, criar_renda, 
+    obter_resumo_mes, filtrar_gastos_por_termo, obter_analise_categorias, 
+    listar_metas
+)
 import os, re
-import json
-from src.database.models import Meta
+from src.database.models import Meta, Transacao, Renda
 from src.ai.processor import analisar_mensagem_com_ia
 from src.database.database import SessionLocal
-from src.database.crud import (
-    criar_transacao, criar_renda, obter_resumo_mes, gerar_relatorio_excel,
-    listar_ultimas_transacoes, apagar_transacao, listar_transacoes,
-    obter_analise_categorias, filtrar_gastos_por_termo
-)
-from src.bot.menu import comando_menu, processar_cliques_menu
+from src.bot.menu import comando_menu, processar_cliques_menu, gerar_botoes_meses
 
-from datetime import datetime, timedelta
-from telegram import constants
+from datetime import datetime, timedelta, date
 
 ESCOLHER_TIPO, DIGITAR_VALOR, DIGITAR_DIA = range(3)
 
@@ -269,18 +266,9 @@ async def comando_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(mensagem, parse_mode='Markdown')
 
 async def comando_relatorio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Acionado quando o usuário digita /relatorio"""
-    
-    teclado_datas = [
-        [InlineKeyboardButton("📅 Últimos 7 Dias", callback_data="btn_rel_7")],
-        [InlineKeyboardButton("📅 Último Mês", callback_data="btn_rel_30")],
-        [InlineKeyboardButton("📅 Últimos 3 Meses", callback_data="btn_rel_90")],
-        [InlineKeyboardButton("📚 Tudo", callback_data="btn_rel_tudo")]
-    ]
-    
     await update.message.reply_text(
-        "📅 *Selecione o período do relatório:*", 
-        reply_markup=InlineKeyboardMarkup(teclado_datas), 
+        "📅 *Selecione o mês do relatório:*", 
+        reply_markup=InlineKeyboardMarkup(gerar_botoes_meses()), 
         parse_mode="Markdown"
     )
 

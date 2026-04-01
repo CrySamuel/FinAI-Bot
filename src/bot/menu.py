@@ -3,14 +3,42 @@ from telegram.ext import ContextTypes
 
 from src.database.database import SessionLocal
 from src.database.crud import (
-    obter_resumo_mes, listar_ultimas_transacoes, 
-    obter_analise_categorias, listar_metas, verificar_meta_categoria,
+    obter_resumo_mes,  obter_analise_categorias, 
+    listar_metas, verificar_meta_categoria, Transacao, Renda
     )
-
+from datetime import date, datetime
 import io
 import pandas as pd
-from datetime import datetime, date
-from src.database.models import Transacao 
+
+def gerar_botoes_meses():
+    """Gera botões dinâmicos para o mês atual e os 3 anteriores"""
+    hoje = date.today()
+    meses_nomes = {
+        1:"Janeiro", 2:"Fevereiro", 3:"Março", 4:"Abril", 
+        5:"Maio", 6:"Junho", 7:"Julho", 8:"Agosto", 
+        9:"Setembro", 10:"Outubro", 11:"Novembro", 12:"Dezembro"
+    }
+    
+    botoes = []
+    mes_atual = hoje.month
+    ano_atual = hoje.year
+    
+    for _ in range(4): # Gera 4 botões (Mês atual + 3 passados)
+        nome_mes = meses_nomes[mes_atual]
+        texto_botao = f"📅 {nome_mes}/{ano_atual}"
+        # Cria um ID invisível para o botão, ex: btn_rel_mes_04_2026
+        callback = f"btn_rel_mes_{mes_atual:02d}_{ano_atual}" 
+        botoes.append([InlineKeyboardButton(texto_botao, callback_data=callback)])
+        
+        mes_atual -= 1
+        if mes_atual == 0:
+            mes_atual = 12
+            ano_atual -= 1
+            
+    botoes.append([InlineKeyboardButton("📚 Tudo", callback_data="btn_rel_tudo")])
+    botoes.append([InlineKeyboardButton("🔙 Voltar", callback_data="btn_voltar")])
+    
+    return botoes
 
 async def comando_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
@@ -111,9 +139,6 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
     elif escolha == "btn_extrato":
         db = SessionLocal()
         try:
-            from src.database.models import Transacao, Renda
-            from datetime import date, datetime
-            
             saidas = db.query(Transacao).filter(Transacao.chat_id == chat_id).order_by(Transacao.id.desc()).limit(10).all()
             entradas = db.query(Renda).filter(Renda.chat_id == chat_id).order_by(Renda.id.desc()).limit(5).all()
             
@@ -163,45 +188,34 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
             db.close()
 
     elif escolha == "btn_relatorio":
-        teclado_datas = [
-            [InlineKeyboardButton("📅 Últimos 7 Dias", callback_data="btn_rel_7")],
-            [InlineKeyboardButton("📅 Último Mês", callback_data="btn_rel_30")],
-            [InlineKeyboardButton("📅 Últimos 3 Meses", callback_data="btn_rel_90")],
-            [InlineKeyboardButton("📚 Tudo", callback_data="btn_rel_tudo")],
-            [InlineKeyboardButton("🔙 Voltar", callback_data="btn_voltar")]
-        ]
         await query.edit_message_text(
-            "📅 *Selecione o período do relatório:*", 
-            reply_markup=InlineKeyboardMarkup(teclado_datas), 
+            "📅 *Selecione o mês do relatório:*", 
+            reply_markup=InlineKeyboardMarkup(gerar_botoes_meses()), 
             parse_mode="Markdown"
         )
 
     elif escolha.startswith("btn_rel_"):
         await query.edit_message_text("⏳ *Filtrando dados e gerando Excel...*", parse_mode="Markdown")
         
-        from datetime import date, timedelta
-        import io
-        import pandas as pd
+        mes_filtro = None
+        ano_filtro = None
+        nome_arquivo_periodo = "Completo"
         
-        hoje = date.today()
-        limite_data = None
-        
-        if escolha == "btn_rel_7":
-            limite_data = hoje - timedelta(days=7)
-        elif escolha == "btn_rel_30":
-            limite_data = hoje - timedelta(days=30)
-        elif escolha == "btn_rel_90":
-            limite_data = hoje - timedelta(days=90)
+        if escolha.startswith("btn_rel_mes_"):
+            partes = escolha.split("_") # Ex: ['btn', 'rel', 'mes', '04', '2026']
+            mes_filtro = int(partes[3])
+            ano_filtro = int(partes[4])
+            nome_arquivo_periodo = f"{mes_filtro:02d}_{ano_filtro}"
 
         db = SessionLocal()
-        try:
-            from src.database.models import Transacao, Renda
-            
+        try:            
             saidas = db.query(Transacao).filter(Transacao.chat_id == chat_id).all()
             entradas = db.query(Renda).filter(Renda.chat_id == chat_id).all()
             
             dados_unificados = []
+            hoje = date.today()
             
+            # 1. Processa as SAÍDAS (Gastos)
             for s in saidas:
                 data_item = s.data.date() if getattr(s, 'data', None) else hoje
                 dados_unificados.append({
@@ -209,12 +223,21 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
                     "Tipo": "Saída",
                     "Categoria": s.categoria,
                     "Descrição": s.descricao,
-                    "Valor": s.valor * -1
+                    "Valor": s.valor * -1  # Gastos ficam negativos para o saldo bater
                 })
                 
+            # 2. Processa as ENTRADAS (Rendas e Extras)
             for e in entradas:
                 try:
-                    data_item = date(hoje.year, hoje.month, int(e.dia_recebimento))
+                    # Se o usuário filtrou um mês específico, usamos esse mês para a renda
+                    # Caso contrário (relatório completo), usamos o mês atual
+                    ano_renda = ano_filtro if ano_filtro else hoje.year
+                    mes_renda = mes_filtro if mes_filtro else hoje.month
+                    
+                    if e.dia_recebimento:
+                        data_item = date(ano_renda, mes_renda, int(e.dia_recebimento))
+                    else:
+                        data_item = date(ano_renda, mes_renda, hoje.day)
                 except (ValueError, TypeError):
                     data_item = hoje
                     
@@ -226,13 +249,17 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
                     "Valor": e.valor
                 })
 
-            if limite_data:
-                dados_unificados = [item for item in dados_unificados if item["Data"] >= limite_data]
+            # 2. A MÁGICA DO FILTRO AQUI
+            if mes_filtro and ano_filtro:
+                dados_unificados = [
+                    item for item in dados_unificados 
+                    if item["Data"].month == mes_filtro and item["Data"].year == ano_filtro
+                ]
 
             if not dados_unificados:
-                teclado_voltar = [[InlineKeyboardButton("🔙 Voltar aos Períodos", callback_data="btn_relatorio")]]
+                teclado_voltar = [[InlineKeyboardButton("🔙 Voltar", callback_data="btn_relatorio")]]
                 await query.edit_message_text(
-                    "📭 Nenhuma movimentação encontrada neste período.", 
+                    "📭 Nenhuma movimentação encontrada neste mês.", 
                     reply_markup=InlineKeyboardMarkup(teclado_voltar)
                 )
                 return
@@ -296,31 +323,40 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
                 for column in worksheet.columns:
                     max_length = 0
                     column_letter = column[0].column_letter
+                    
                     for cell in column:
                         try:
                             if cell.value:
+                                # Se for a coluna de Valor (E), damos um espaço extra para o "R$" e centavos
                                 length = len(str(cell.value))
-                                if length > max_length: max_length = length
-                        except: pass
-                    worksheet.column_dimensions[column_letter].width = max_length + 4
+                                if length > max_length:
+                                    max_length = length
+                        except:
+                            pass
+                    
+                    # Se for a coluna E (índice 5), garantimos um tamanho mínimo de 18
+                    if column_letter == 'E':
+                        worksheet.column_dimensions[column_letter].width = max(max_length + 6, 18)
+                    else:
+                        worksheet.column_dimensions[column_letter].width = max_length + 4
 
-                # 5. Linha de Totalizador Final
+                # 5. Linha de Totalizador Final (Garantindo que apareça)
                 total_row = worksheet.max_row + 1
                 saldo = df['Valor'].sum()
                 
-                # Preenche a linha de total com cor de fundo cinza e bordas
+                # Estiliza a linha do total
                 for col_idx in range(1, 6):
                     cell = worksheet.cell(row=total_row, column=col_idx)
                     cell.fill = cinza_total
                     cell.border = thin_border
                 
-                # Texto e Valor do Saldo
                 label_cell = worksheet.cell(row=total_row, column=4, value="SALDO TOTAL:")
                 label_cell.font = Font(bold=True)
                 label_cell.alignment = Alignment(horizontal="right")
                 
                 saldo_cell = worksheet.cell(row=total_row, column=5, value=saldo)
                 saldo_cell.font = Font(bold=True, color="000000")
+                # Forçamos o formato de moeda para o Excel entender o número
                 saldo_cell.number_format = '"R$" #,##0.00'
 
             buffer.seek(0)
@@ -332,7 +368,7 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
             await context.bot.send_document(
                 chat_id=chat_id,
                 document=buffer,
-                filename=arquivo_nome,
+                filename=f"Relatorio_FinAI_{nome_arquivo_periodo}.xlsx",
                 caption="✅ *Seu relatório está pronto!*",
                 parse_mode="Markdown"
             )
