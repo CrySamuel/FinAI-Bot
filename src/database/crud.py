@@ -1,9 +1,8 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func, extract
 from datetime import datetime, date, timedelta
-from src.database.models import Transacao, Renda
+from src.database.models import Transacao, Renda, Meta
 import pandas as pd
-import os
 
 def criar_transacao(db: Session, valor: float, categoria: str, descricao: str, tipo: str, chat_id: int, data: datetime = None):
     nova_transacao = Transacao(
@@ -40,20 +39,38 @@ def listar_rendas(db: Session, chat_id: int):
     return db.query(Renda).filter(Renda.chat_id == chat_id).all()
 
 def obter_resumo_mes(db: Session, chat_id: int):
+    from datetime import date
+    from sqlalchemy import func, extract
+    from src.database.models import Transacao, Renda
+    
     hoje = date.today()
     
-    saidas = db.query(func.sum(Transacao.valor)).filter(
+    saidas_mes = db.query(func.sum(Transacao.valor)).filter(
         Transacao.tipo == "saida",
         Transacao.chat_id == chat_id,
         extract('month', Transacao.data) == hoje.month,
         extract('year', Transacao.data) == hoje.year
     ).scalar() or 0.0
     
-    entradas = db.query(func.sum(Renda.valor)).filter(
-        Renda.chat_id == chat_id 
+    entradas_fixas = db.query(func.sum(Renda.valor)).filter(Renda.chat_id == chat_id).scalar() or 0.0
+    entradas_pontuais_mes = db.query(func.sum(Transacao.valor)).filter(
+        Transacao.tipo == "entrada",
+        Transacao.chat_id == chat_id,
+        extract('month', Transacao.data) == hoje.month,
+        extract('year', Transacao.data) == hoje.year
     ).scalar() or 0.0
+    receitas_mes_atual = entradas_fixas + entradas_pontuais_mes
+
+    todas_entradas_pontuais = db.query(func.sum(Transacao.valor)).filter(Transacao.tipo == "entrada", Transacao.chat_id == chat_id).scalar() or 0.0
+    todas_saidas = db.query(func.sum(Transacao.valor)).filter(Transacao.tipo == "saida", Transacao.chat_id == chat_id).scalar() or 0.0
     
-    return {"despesas": saidas, "receitas": entradas}
+    saldo_bancario = (entradas_fixas + todas_entradas_pontuais) - todas_saidas
+    
+    return {
+        "despesas_mes": saidas_mes, 
+        "receitas_totais": receitas_mes_atual, 
+        "saldo_bancario": saldo_bancario
+    }
 
 def gerar_relatorio_excel(db: Session, chat_id: int, dias: int = None, caminho_arquivo: str = "relatorio_mensal.xlsx"):
     query = db.query(Transacao).filter(Transacao.chat_id == chat_id)
@@ -120,7 +137,7 @@ def filtrar_gastos_por_termo(db: Session, termo: str, chat_id: int):
     total = sum(t.valor for t in transacoes)
     return total, transacoes
     
-def verificar_meta_categoria(db: Session, chat_id: int, categoria: str):
+def verificar_meta_categoria(db: Session, chat_id: int, categoria: str, data_ref=None):
     from src.database.models import Transacao, Meta
     from datetime import date
     from sqlalchemy import func, extract
@@ -133,12 +150,14 @@ def verificar_meta_categoria(db: Session, chat_id: int, categoria: str):
     if not meta:
         return None
 
-    hoje = date.today()
+    if data_ref is None:
+        data_ref = date.today()
+
     total_gasto = db.query(func.sum(Transacao.valor)).filter(
         Transacao.chat_id == chat_id,
         Transacao.categoria.ilike(categoria),
-        extract('month', Transacao.data) == hoje.month,
-        extract('year', Transacao.data) == hoje.year
+        extract('month', Transacao.data) == data_ref.month,
+        extract('year', Transacao.data) == data_ref.year
     ).scalar() or 0.0
 
     restante = meta.valor_limite - total_gasto
