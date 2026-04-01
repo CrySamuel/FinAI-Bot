@@ -72,14 +72,14 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 data_final = datetime.utcnow() - timedelta(hours=3)
             
             if tipo_movimentacao == "entrada":
-                dia_recebimento = data_final.day 
-                criar_renda(
+                criar_transacao(
                     db=db, 
-                    descricao=dados_extraidos["descricao"], 
                     valor=valor, 
-                    dia_recebimento=dia_recebimento, 
-                    chat_id=chat_id, 
-                    tipo="extra"
+                    categoria=dados_extraidos.get("categoria", "Renda Extra"), 
+                    descricao=dados_extraidos["descricao"],
+                    tipo="entrada", 
+                    chat_id=chat_id,
+                    data=data_final 
                 )
                 resposta = (
                     "🤑 *Dinheiro na conta!*\n"
@@ -89,7 +89,6 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     f"📅 Data ref: {data_final.strftime('%d/%m/%Y')}"
                 )
             else:
-                # 1. Registra no Banco
                 criar_transacao(
                     db=db, 
                     valor=valor, 
@@ -100,7 +99,6 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     data=data_final 
                 )
 
-                # 2. Cria o texto base do gasto
                 texto_gasto = (
                     "✅ *Gasto registrado!*\n"
                     f"🏷️ Categoria: {dados_extraidos['categoria']}\n"
@@ -111,7 +109,7 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
                                 
                 status_meta = ""
                 try:
-                    info_meta = verificar_meta_categoria(db, chat_id, dados_extraidos["categoria"])
+                    info_meta = verificar_meta_categoria(db, chat_id, dados_extraidos["categoria"], data_final)
 
                     if info_meta: 
                         emoji_status = "✅" if info_meta['restante'] > 0 else "⚠️"
@@ -136,7 +134,6 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await mensagem_espera.edit_text("❌ Não entendi. Pode reformular?")
 
 async def comando_renda(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # 1. Prepara o texto e os botões
     texto = "💸 *Nova Renda!*\nQual é a origem desse dinheiro?"
 
     teclado = [
@@ -241,27 +238,29 @@ async def comando_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     resumo = obter_resumo_mes(db, chat_id)
     db.close()
 
-    receitas = resumo["receitas"]
-    despesas = resumo["despesas"]
-    saldo = receitas - despesas 
+    receitas_totais = resumo["receitas_totais"]
+    despesas_mes = resumo["despesas_mes"]
+    saldo_bancario = resumo["saldo_bancario"]
 
-    rec_fmt = f"{receitas:.2f}".replace('.', ',')
-    desp_fmt = f"{despesas:.2f}".replace('.', ',')
-    saldo_fmt = f"{saldo:.2f}".replace('.', ',')
+    rec_fmt = f"{receitas_totais:.2f}".replace('.', ',')
+    desp_mes_fmt = f"{despesas_mes:.2f}".replace('.', ',')
+    saldo_fmt = f"{saldo_bancario:.2f}".replace('.', ',')
 
     mensagem = (
-        "📊 *Resumo Financeiro do Mês* 📊\n\n"
-        f"📈 *Total Recebido:* R$ {rec_fmt}\n"
-        f"📉 *Total Gasto:* R$ {desp_fmt}\n"
-        "-------------------------\n"
+        "🏦 *Conta Bancária (Saldo Real)*\n"
+        f"💰 *Disponível:* R$ {saldo_fmt}\n\n"
+        "━━━━━━━━━━━━━━━━\n"
+        "📊 *Controle deste Mês*\n"
+        f"📉 Gastos do Mês: R$ {desp_mes_fmt}\n"
+        "━━━━━━━━━━━━━━━━\n"
     )
 
-    if saldo > 0:
-        mensagem += f"✅ *Saldo Positivo:* R$ {saldo_fmt}\n\nExcelente! O desafio financeiro segue firme e forte!"
-    elif saldo == 0:
-        mensagem += f"⚖️ *Saldo Zerado:* R$ 0,00\n\nFique de olho nos próximos gastos."
+    if saldo_bancario > 0:
+        mensagem += "✅ O desafio de economia segue firme!"
+    elif saldo_bancario == 0:
+        mensagem += "⚖️ Conta zerada. Atenção aos próximos gastos."
     else:
-        mensagem += f"🚨 *Saldo Negativo:* R$ {saldo_fmt}\n\nSinal vermelho! Hora de segurar as despesas."
+        mensagem += "🚨 Saldo negativo! Você está no cheque especial."
 
     await update.message.reply_text(mensagem, parse_mode='Markdown')
 
@@ -277,9 +276,6 @@ async def comando_transacoes(update: Update, context: ContextTypes.DEFAULT_TYPE)
     db = SessionLocal()
     
     try:
-        from src.database.models import Transacao, Renda
-        from datetime import date, datetime
-        
         saidas = db.query(Transacao).filter(Transacao.chat_id == chat_id).all()
         entradas = db.query(Renda).filter(Renda.chat_id == chat_id).all()
         
@@ -334,9 +330,6 @@ async def comando_ultimos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
 
     try:
-        from src.database.models import Transacao, Renda
-        from datetime import date, datetime
-        
         saidas = db.query(Transacao).filter(Transacao.chat_id == chat_id).order_by(Transacao.id.desc()).limit(5).all()
         entradas = db.query(Renda).filter(Renda.chat_id == chat_id).order_by(Renda.id.desc()).limit(5).all()
 
@@ -384,7 +377,6 @@ async def comando_apagar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         id_item = int(argumento[1:])
         
         if tipo == 'g':
-            from src.database.models import Transacao
             item = db.query(Transacao).filter(Transacao.id == id_item, Transacao.chat_id == chat_id).first()
             if item:
                 db.delete(item)
@@ -394,7 +386,6 @@ async def comando_apagar(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ Gasto não encontrado. Verifique o ID no /transacoes.")
                 
         elif tipo == 'r':
-            from src.database.models import Renda
             item = db.query(Renda).filter(Renda.id == id_item, Renda.chat_id == chat_id).first()
             if item:
                 db.delete(item)
@@ -413,10 +404,6 @@ async def comando_apagar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def comando_analise(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    
-    # Importamos a conexão e a função correta
-    from src.database.database import SessionLocal
-    from src.database.crud import obter_analise_categorias
     
     db = SessionLocal()
     try:
@@ -454,7 +441,7 @@ async def comando_analise(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 async def comando_filtro(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id # <-- IDENTIDADE CAPTURADA
+    chat_id = update.effective_chat.id 
     if not context.args:
         await update.message.reply_text("⚠️ Me diga o que quer buscar. Exemplo: /filtro mercado")
         return
@@ -498,8 +485,6 @@ async def comando_definir_meta(update: Update, context: ContextTypes.DEFAULT_TYP
             db.add(nova_meta)
         
         db.commit()
-
-        
         db.close()
         
         await update.message.reply_text(f"🎯 Meta de *{categoria}* definida para *R$ {valor:.2f}*!", parse_mode="Markdown")
@@ -508,12 +493,9 @@ async def comando_definir_meta(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def comando_metas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    from src.database.database import SessionLocal
     
     db = SessionLocal()
-    try:
-        from src.database.crud import listar_metas, verificar_meta_categoria
-        
+    try:        
         metas_cadastradas = listar_metas(db, chat_id)
         
         if not metas_cadastradas:
