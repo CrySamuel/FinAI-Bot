@@ -9,6 +9,7 @@ from src.database.crud import (
 from datetime import date, datetime
 import io
 import pandas as pd
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 def gerar_botoes_meses():
     """Gera botões dinâmicos para o mês atual e os 3 anteriores"""
@@ -23,7 +24,7 @@ def gerar_botoes_meses():
     mes_atual = hoje.month
     ano_atual = hoje.year
     
-    for _ in range(4): # Gera 4 botões (Mês atual + 3 passados)
+    for _ in range(4): 
         nome_mes = meses_nomes[mes_atual]
         texto_botao = f"📅 {nome_mes}/{ano_atual}"
         # Cria um ID invisível para o botão, ex: btn_rel_mes_04_2026
@@ -44,10 +45,10 @@ async def comando_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     teclado = [
             [InlineKeyboardButton("💸 Nova Renda", callback_data="renda_start"),
-            InlineKeyboardButton("📊 Saldo", callback_data="btn_saldo")], # Lado a lado
-            
+            InlineKeyboardButton("📊 Saldo", callback_data="btn_saldo")], 
+
             [InlineKeyboardButton("📋 Extrato", callback_data="btn_extrato"),
-            InlineKeyboardButton("📈 Categorias", callback_data="btn_analise")], # Lado a lado
+            InlineKeyboardButton("📈 Categorias", callback_data="btn_analise")],
             
             [InlineKeyboardButton("🎯 Minhas Metas", callback_data="btn_metas")],
             [InlineKeyboardButton("📁 Relatório Excel", callback_data="btn_relatorio")]
@@ -72,18 +73,30 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
         db = SessionLocal()
         try:
             resumo = obter_resumo_mes(db, chat_id)
-            receitas = resumo["receitas"]
-            despesas = resumo["despesas"]
-            saldo = receitas - despesas
+            
+            receitas_totais = resumo["receitas_totais"]
+            despesas_mes = resumo["despesas_mes"]
+            saldo_bancario = resumo["saldo_bancario"]
+            
+            rec_fmt = f"{receitas_totais:.2f}".replace('.', ',')
+            desp_mes_fmt = f"{despesas_mes:.2f}".replace('.', ',')
+            saldo_fmt = f"{saldo_bancario:.2f}".replace('.', ',')
             
             texto_saldo = (
-                "⚖️ *Resumo Financeiro*\n"
+                "🏦 *Conta Bancária (Saldo Real)*\n"
+                f"💰 *Disponível:* R$ {saldo_fmt}\n\n"
                 "━━━━━━━━━━━━━━━━\n"
-                f"🟢 Entradas: R$ {receitas:.2f}\n"
-                f"🔴 Saídas: R$ {despesas:.2f}\n"
+                "📊 *Controle deste Mês*\n"
+                f"📉 Gastos do Mês: R$ {desp_mes_fmt}\n"
                 "━━━━━━━━━━━━━━━━\n"
-                f"💰 *Saldo Atual: R$ {saldo:.2f}*"
-            ).replace('.', ',') 
+            )
+
+            if saldo_bancario > 0:
+                texto_saldo += "✅ O desafio de economia segue firme!"
+            elif saldo_bancario == 0:
+                texto_saldo += "⚖️ Conta zerada. Atenção aos próximos gastos."
+            else:
+                texto_saldo += "🚨 Saldo negativo! Você está no cheque especial."
             
             teclado_voltar = [[InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="btn_voltar")]]
             reply_markup = InlineKeyboardMarkup(teclado_voltar)
@@ -202,35 +215,41 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
         nome_arquivo_periodo = "Completo"
         
         if escolha.startswith("btn_rel_mes_"):
-            partes = escolha.split("_") # Ex: ['btn', 'rel', 'mes', '04', '2026']
+            partes = escolha.split("_") 
             mes_filtro = int(partes[3])
             ano_filtro = int(partes[4])
             nome_arquivo_periodo = f"{mes_filtro:02d}_{ano_filtro}"
 
         db = SessionLocal()
         try:            
-            saidas = db.query(Transacao).filter(Transacao.chat_id == chat_id).all()
-            entradas = db.query(Renda).filter(Renda.chat_id == chat_id).all()
+            transacoes_banco = db.query(Transacao).filter(Transacao.chat_id == chat_id).all()
+            rendas_fixas = db.query(Renda).filter(Renda.chat_id == chat_id).all()
             
             dados_unificados = []
             hoje = date.today()
             
-            # 1. Processa as SAÍDAS (Gastos)
-            for s in saidas:
-                data_item = s.data.date() if getattr(s, 'data', None) else hoje
-                dados_unificados.append({
-                    "Data": data_item,
-                    "Tipo": "Saída",
-                    "Categoria": s.categoria,
-                    "Descrição": s.descricao,
-                    "Valor": s.valor * -1  # Gastos ficam negativos para o saldo bater
-                })
+            for t in transacoes_banco:
+                data_item = t.data.date() if getattr(t, 'data', None) else hoje
                 
-            # 2. Processa as ENTRADAS (Rendas e Extras)
-            for e in entradas:
+                if t.tipo == "saida":
+                    dados_unificados.append({
+                        "Data": data_item, 
+                        "Tipo": "Saída", 
+                        "Categoria": t.categoria,
+                        "Descrição": t.descricao, 
+                        "Valor": t.valor * -1 
+                    })
+                else: 
+                    dados_unificados.append({
+                        "Data": data_item, 
+                        "Tipo": "Entrada", 
+                        "Categoria": t.categoria,
+                        "Descrição": t.descricao, 
+                        "Valor": t.valor 
+                    })
+                
+            for e in rendas_fixas:
                 try:
-                    # Se o usuário filtrou um mês específico, usamos esse mês para a renda
-                    # Caso contrário (relatório completo), usamos o mês atual
                     ano_renda = ano_filtro if ano_filtro else hoje.year
                     mes_renda = mes_filtro if mes_filtro else hoje.month
                     
@@ -242,14 +261,12 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
                     data_item = hoje
                     
                 dados_unificados.append({
-                    "Data": data_item,
-                    "Tipo": "Entrada",
-                    "Categoria": "Receita",
-                    "Descrição": e.descricao,
+                    "Data": data_item, 
+                    "Tipo": "Entrada Fixa", 
+                    "Categoria": "Salário/Benefício",
+                    "Descrição": e.descricao, 
                     "Valor": e.valor
                 })
-
-            # 2. A MÁGICA DO FILTRO AQUI
             if mes_filtro and ano_filtro:
                 dados_unificados = [
                     item for item in dados_unificados 
@@ -273,9 +290,7 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
                 workbook = writer.book
                 worksheet = writer.sheets['Relatório FinAI']
 
-                from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
                 
-                # Definição de Estilos
                 header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
                 header_font = Font(color="FFFFFF", bold=True, size=12)
                 verde_suave = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
@@ -286,40 +301,33 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
                 thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), 
                                     top=Side(style='thin'), bottom=Side(style='thin'))
 
-                # 2. Estilizando o Cabeçalho (Linha 1)
                 for cell in worksheet[1]:
                     cell.fill = header_fill
                     cell.font = header_font
                     cell.alignment = center_alignment
                     cell.border = thin_border
 
-                # 3. Loop Único para Estilizar os Dados (Linha 2 em diante)
                 for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row):
                     data_cell = row[0]
                     tipo_cell = row[1]
                     valor_cell = row[4]
 
-                    # Formatação de Data e Alinhamento Central
                     data_cell.number_format = 'DD/MM/YYYY'
                     data_cell.alignment = center_alignment
                     tipo_cell.alignment = center_alignment
 
-                    # Lógica de Cores por Tipo (Entrada vs Saída)
                     if "Saída" in str(tipo_cell.value):
                         tipo_cell.fill = vermelho_suave
-                        valor_cell.font = Font(color="9C0006", bold=True) # Vermelho escuro
+                        valor_cell.font = Font(color="9C0006", bold=True) 
                     else:
                         tipo_cell.fill = verde_suave
-                        valor_cell.font = Font(color="006100", bold=True) # Verde escuro
+                        valor_cell.font = Font(color="006100", bold=True) 
                     
-                    # Formatação de Moeda
                     valor_cell.number_format = '"R$" #,##0.00'
                     
-                    # Aplica bordas em todas as células da linha
                     for cell in row:
                         cell.border = thin_border
 
-                # 4. Ajuste Automático de Colunas (Inteligente)
                 for column in worksheet.columns:
                     max_length = 0
                     column_letter = column[0].column_letter
@@ -327,24 +335,20 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
                     for cell in column:
                         try:
                             if cell.value:
-                                # Se for a coluna de Valor (E), damos um espaço extra para o "R$" e centavos
                                 length = len(str(cell.value))
                                 if length > max_length:
                                     max_length = length
                         except:
                             pass
                     
-                    # Se for a coluna E (índice 5), garantimos um tamanho mínimo de 18
                     if column_letter == 'E':
                         worksheet.column_dimensions[column_letter].width = max(max_length + 6, 18)
                     else:
                         worksheet.column_dimensions[column_letter].width = max_length + 4
 
-                # 5. Linha de Totalizador Final (Garantindo que apareça)
                 total_row = worksheet.max_row + 1
                 saldo = df['Valor'].sum()
                 
-                # Estiliza a linha do total
                 for col_idx in range(1, 6):
                     cell = worksheet.cell(row=total_row, column=col_idx)
                     cell.fill = cinza_total
@@ -356,12 +360,10 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
                 
                 saldo_cell = worksheet.cell(row=total_row, column=5, value=saldo)
                 saldo_cell.font = Font(bold=True, color="000000")
-                # Forçamos o formato de moeda para o Excel entender o número
                 saldo_cell.number_format = '"R$" #,##0.00'
 
             buffer.seek(0)
             
-            # Envio Único do Documento
             nome_periodo = escolha.replace("btn_rel_", "")
             arquivo_nome = f"Relatorio_FinAI_{nome_periodo}dias.xlsx" if nome_periodo != "tudo" else "Relatorio_FinAI_Completo.xlsx"
             
