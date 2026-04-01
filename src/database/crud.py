@@ -3,7 +3,7 @@ from sqlalchemy import func, extract
 from datetime import datetime
 from src.database.models import Transacao, Renda
 import pandas as pd
-import os
+from datetime import date
 
 def criar_transacao(db: Session, valor: float, categoria: str, descricao: str, tipo: str, chat_id: int, data: datetime = None):
     nova_transacao = Transacao(
@@ -40,9 +40,13 @@ def listar_rendas(db: Session, chat_id: int):
     return db.query(Renda).filter(Renda.chat_id == chat_id).all()
 
 def obter_resumo_mes(db: Session, chat_id: int):
+    hoje = date.today()
+    
     saidas = db.query(func.sum(Transacao.valor)).filter(
         Transacao.tipo == "saida",
-        Transacao.chat_id == chat_id 
+        Transacao.chat_id == chat_id,
+        extract('month', Transacao.data) == hoje.month,
+        extract('year', Transacao.data) == hoje.year
     ).scalar() or 0.0
     
     entradas = db.query(func.sum(Renda.valor)).filter(
