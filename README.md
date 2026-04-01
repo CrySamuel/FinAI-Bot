@@ -3,6 +3,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![Telegram API](https://img.shields.io/badge/Telegram-Bot%20API-0088cc.svg)](https://core.telegram.org/bots/api)
 [![Groq AI](https://img.shields.io/badge/AI-Groq%20(Llama--3)-f37121.svg)](https://groq.com/)
+[![Oracle Cloud](https://img.shields.io/badge/Oracle_Cloud-F80000?logo=oracle&logoColor=white)](https://cloud.oracle.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 O **FinAI** é um bot de gestão financeira pessoal construído para o Telegram. Ele utiliza Inteligência Artificial (LLMs) para ler mensagens em linguagem natural (ex: *"Gastei 50 no ifood com cartão de crédito ontem"*), extrair o contexto e registrar automaticamente no banco de dados. 
@@ -15,7 +16,7 @@ Este projeto foi desenhado com uma **Arquitetura Multitenant**, permitindo que m
 * **📊 Relatórios e Análises:** Geração de gráficos de progresso em texto e exportação de balanços completos em planilhas **Excel (.xlsx)** formatadas.
 * **📱 Interface Rica (UI/UX):** Menus interativos com botões inline, facilitando a navegação sem precisar digitar comandos.
 * **🔒 Arquitetura Multitenant:** Uso do `chat_id` do Telegram como chave primária de isolamento, garantindo que cada usuário acesse apenas seus próprios dados.
-* **☁️ Pronto para Nuvem:** Configurado com Flask rodando em background (`health_check`) para manter o bot online 24/7 em plataformas como Render ou Heroku.
+* **☁️ Infraestrutura Dedicada:** Hospedado em uma VPS autônoma na **Oracle Cloud Infrastructure (OCI)**, rodando 24/7 em ambiente Linux otimizado.
 
 ---
 
@@ -26,6 +27,7 @@ Este projeto foi desenhado com uma **Arquitetura Multitenant**, permitindo que m
 * **Banco de Dados:** SQLAlchemy (ORM) com SQLite/PostgreSQL
 * **Inteligência Artificial:** Groq API (Modelo Llama-3-8b com saída nativa em JSON)
 * **Processamento de Dados:** Pandas & OpenPyXL (Geração de Excel)
+* **Infraestrutura & Deploy:** Oracle Cloud (Ubuntu Linux), `tmux` para background processing e Git CI/CD workflow.
 
 ---
 
@@ -35,7 +37,8 @@ Este projeto foi desenhado com uma **Arquitetura Multitenant**, permitindo que m
 <img width="817" height="689" alt="Captura de tela 2026-03-25 143006" src="https://github.com/user-attachments/assets/7fceb4e1-9059-4651-a199-3cbce1e264cf" />
 <img width="812" height="725" alt="Captura de tela 2026-03-25 143019" src="https://github.com/user-attachments/assets/a301d379-54ac-4c3e-88aa-8ee7def85798" />
 <img width="799" height="624" alt="Captura de tela 2026-03-25 143030" src="https://github.com/user-attachments/assets/58f756f0-6ec7-4ec6-909d-0cf36f34a099" />
-<img width="846" height="774" alt="Captura de tela 2026-03-25 143041" src="https://github.com/user-attachments/assets/a1ae31e5-c54c-433b-809b-06476715d264" /><img width="763" height="389" alt="Captura de tela 2026-03-25 143137" src="https://github.com/user-attachments/assets/eef72b74-337a-4b42-82ce-fa5a308fa0a8" />
+<img width="846" height="774" alt="Captura de tela 2026-03-25 143041" src="https://github.com/user-attachments/assets/a1ae31e5-c54c-433b-809b-06476715d264" />
+<img width="763" height="389" alt="Captura de tela 2026-03-25 143137" src="https://github.com/user-attachments/assets/eef72b74-337a-4b42-82ce-fa5a308fa0a8" />
 
 ---
 
@@ -44,10 +47,9 @@ Este projeto foi desenhado com uma **Arquitetura Multitenant**, permitindo que m
 Se você quiser testar ou contribuir com o FinAI, siga os passos abaixo:
 
 ### 1. Clone o repositório
-1. Clone este repositório:
 ```bash
-git clone https://github.com/CrySamuel/FinAI-Bot.git
-cd finai-bot
+git clone [https://github.com/CrySamuel/FinAI-Bot.git](https://github.com/CrySamuel/FinAI-Bot.git)
+cd FinAI-Bot
 ```
 2. Crie e ative um ambiente virtual:
 ```bash
@@ -72,19 +74,16 @@ PORT=8080
 python app.py
 ```
 
-## 🛣️ Roadmap (Próximos Passos)
+## ☁️ Deploy na Nuvem (Produção)
+O bot está configurado para rodar nativamente em servidores Linux. O fluxo de atualização em produção segue as melhores práticas de versionamento:
 
-[x] Categorização Estrita com IA (JSON Mode)
+Commit e Push das alterações no repositório principal.
 
-[x] Exportação de Balanço em Excel
+Acesso SSH ao servidor (Oracle Cloud).
 
-[x] Interface de Botões Inline
+Atualização via git pull.
 
-[ ] Implementação de Metas de Gastos Mensais
-
-[ ] Alertas Automáticos de Vencimento de Fatura
-
-[ ] Preparação para monetização (SaaS)
+Execução contínua em segundo plano gerenciada via tmux.
 
 ## 👨‍💻 Autor
 Crys
