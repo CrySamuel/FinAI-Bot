@@ -189,32 +189,25 @@ def calcular_meses_futuros(data_base, meses_a_adicionar):
     return date(ano, mes, min(dia, max_dia))
 
 def registrar_compra_parcelada(db, chat_id, valor_total, categoria, descricao, cartao_nome, parcelas, data_compra):
-    """Gera a cascata de parcelas baseada no dia de fechamento do cartão"""
     
-    # 1. Acha o cartão no banco
     cartao = db.query(Cartao).filter(Cartao.chat_id == chat_id, Cartao.nome.ilike(cartao_nome)).first()
     if not cartao:
         return False, f"Cartão '{cartao_nome}' não encontrado. Cadastre-o primeiro!"
 
     valor_parcela = valor_total / parcelas
-    id_compra = str(uuid.uuid4())[:8] # Gera um código tipo 'a1b2c3d4' para unir as parcelas
+    id_compra = str(uuid.uuid4())[:8] 
 
-    # 2. Lógica do Fechamento
-    # Se comprou no dia 12 e fecha dia 10, a primeira parcela já cai para o MÊS QUE VEM
     meses_pulo = 0
     if data_compra.day >= cartao.dia_fechamento:
         meses_pulo = 1
 
     transacoes_geradas = []
     
-    # 3. O Loop das Parcelas
     for i in range(parcelas):
         numero_parcela = i + 1
         
-        # Calcula em qual mês essa parcela vai cair
         data_fatura_desta_parcela = calcular_meses_futuros(data_compra, meses_pulo + i)
         
-        # Força a data para ser o dia do vencimento da fatura
         data_cobranca = date(data_fatura_desta_parcela.year, data_fatura_desta_parcela.month, cartao.dia_vencimento)
 
         nova_transacao = Transacao(
@@ -235,4 +228,13 @@ def registrar_compra_parcelada(db, chat_id, valor_total, categoria, descricao, c
         transacoes_geradas.append(nova_transacao)
 
     db.commit()
-    return True, f"✅ Compra de R$ {valor_total:.2f} dividida em {parcelas}x de R$ {valor_parcela:.2f} no cartão {cartao.nome.capitalize()}!"
+    resumo = {
+        "valor_total": valor_total,
+        "valor_parcela": valor_parcela,
+        "parcelas": parcelas,
+        "categoria": categoria,
+        "descricao": descricao,
+        "cartao": cartao.nome.capitalize()
+    }
+    
+    return True, resumo

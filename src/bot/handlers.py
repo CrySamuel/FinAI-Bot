@@ -3,14 +3,14 @@ from telegram.ext import (
     ContextTypes, CommandHandler, MessageHandler, filters, 
     ConversationHandler, CallbackQueryHandler
 )
-
+from sqlalchemy import extract, func
 from src.database.crud import (
     verificar_meta_categoria, criar_transacao, criar_renda, 
     obter_resumo_mes, filtrar_gastos_por_termo, obter_analise_categorias, 
     listar_metas, registrar_compra_parcelada
 )
 import re
-from src.database.models import Meta, Transacao, Renda
+from src.database.models import Meta, Transacao, Renda, Cartao
 from src.ai.processor import analisar_mensagem_com_ia
 from src.database.database import SessionLocal
 from src.bot.menu import comando_menu, processar_cliques_menu, gerar_botoes_meses
@@ -30,6 +30,78 @@ async def comando_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(mensagem_boas_vindas, parse_mode="Markdown")
     
     await comando_menu(update, context)
+
+async def comando_ajuda(update, context):
+    """Gera o menu interativo de ajuda com todos os comandos categorizados"""
+    
+    keyboard = [
+        [InlineKeyboardButton("📥 Como Registrar Entradas e Gastos", callback_data='ajuda_registros')],
+        [InlineKeyboardButton("📊 Acompanhamento do Dia a Dia", callback_data='ajuda_dia_a_dia')],
+        [InlineKeyboardButton("🔎 Relatórios e Análise Profunda", callback_data='ajuda_analise')]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    texto_menu = (
+        "🛟 *Central de Comando - FinAI*\n"
+        "━━━━━━━━━━━━━━━━━━━\n\n"
+        "O sistema possui diversas ferramentas para o nosso Desafio 2026.\n"
+        "Escolha uma categoria abaixo para ver os comandos detalhados:"
+    )
+    
+    await update.message.reply_text(texto_menu, reply_markup=reply_markup, parse_mode="Markdown")   
+
+async def botao_ajuda_clicado(update, context):
+    """Responde aos cliques nos botões e mostra a lista de comandos da categoria"""
+    query = update.callback_query
+    await query.answer() 
+    
+    teclado_voltar = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 Voltar ao Menu Principal", callback_data='ajuda_voltar')]
+    ])
+
+    if query.data == 'ajuda_registros':
+        texto = (
+            "📥 *REGISTROS E ENTRADAS*\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            "Como alimentar o FinAI com dados:\n\n"
+            "🗣️ *Texto Livre:* Apenas digite seu gasto (ex: _'Paguei 20 no ifood'_). A Inteligência Artificial faz o resto!\n"
+            "💵 */renda* - Cadastra seu salário, adiantamento ou benefícios mensais.\n"
+            "💳 */novo_cartao* - Cadastra um novo cartão de crédito (Precisa de Nome, Fechamento e Vencimento)."
+        )
+    
+    elif query.data == 'ajuda_dia_a_dia':
+        texto = (
+            "📊 *ACOMPANHAMENTO DO DIA A DIA*\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            "Comandos rápidos para olhar enquanto está na rua:\n\n"
+            "⚖️ */saldo* - Mostra o balanço do mês atual (Receitas reais vs Despesas do mês).\n"
+            "🕒 */ultimos* - Mostra os 5 últimos gastos registrados na hora.\n"
+            "🗑️ */apagar [ID]* - Lançou algo errado? Copie o ID da transação e use este comando para deletar (ex: `/apagar 15`)."
+        )
+        
+    elif query.data == 'ajuda_analise':
+        texto = (
+            "🔎 *RELATÓRIOS E ANÁLISE PROFUNDA*\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            "Ferramentas avançadas para auditar o orçamento:\n\n"
+            "💰 */transacoes* - Lista absolutamente todos os gastos registrados na base.\n"
+            "🍕 */analise* - Mostra a porcentagem de gastos dividida por categoria (Onde o dinheiro está sumindo?).\n"
+            "🔍 */filtro [termo]* - Calcula o total gasto em um local ou categoria específica (ex: `/filtro ifood` ou `/filtro transporte`).\n"
+            "📊 */relatorio* - Gera uma planilha Excel detalhada com todo o histórico e envia para você baixar."
+        )
+        
+    elif query.data == 'ajuda_voltar':
+        keyboard = [
+            [InlineKeyboardButton("📥 Como Registrar Entradas e Gastos", callback_data='ajuda_registros')],
+            [InlineKeyboardButton("📊 Acompanhamento do Dia a Dia", callback_data='ajuda_dia_a_dia')],
+            [InlineKeyboardButton("🔎 Relatórios e Análise Profunda", callback_data='ajuda_analise')]
+        ]
+        texto = "🛟 *Central de Comando - FinAI*\n━━━━━━━━━━━━━━━━━━━\n\nEscolha uma categoria abaixo para ver os comandos:"
+        await query.edit_message_text(text=texto, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        return
+
+    await query.edit_message_text(text=texto, reply_markup=teclado_voltar, parse_mode="Markdown")
 
 async def comando_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensagem = (
@@ -95,21 +167,31 @@ async def processar_mensagem(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 nome_cartao = dados_extraidos.get("cartao")
         
                 if metodo == "credito" and parcelas > 1 and nome_cartao:
-                    sucesso, msg_retorno = registrar_compra_parcelada(
-                        db=db,
-                        chat_id=chat_id,
-                        valor_total=valor,
-                        categoria=dados_extraidos.get("categoria", "Outros"),
-                        descricao=dados_extraidos["descricao"],
-                        cartao_nome=nome_cartao,
-                        parcelas=parcelas,
-                        data_compra=data_final
-                    )
+                    sucesso, resultado = registrar_compra_parcelada(
+                    db=db,
+                    chat_id=chat_id,
+                    valor_total=valor,
+                    categoria=dados_extraidos.get("categoria", "Outros"),
+                    descricao=dados_extraidos["descricao"],
+                    cartao_nome=nome_cartao,
+                    parcelas=parcelas,
+                    data_compra=data_final
+                )
                     
                     if sucesso:
-                        texto_gasto = f"💳 *Crédito Inteligente*\n{msg_retorno}"
+                        texto_gasto = (
+                            "💳 *CRÉDITO INTELIGENTE*\n"
+                            "━━━━━━━━━━━━━━━━━━━━\n"
+                            f"🛍️ *Item:* {resultado['descricao'].capitalize()}\n"
+                            f"🏷️ *Categoria:* {resultado['categoria']}\n"
+                            f"🏦 *Cartão:* {resultado['cartao']}\n"
+                            "━━━━━━━━━━━━━━━━━━━━\n"
+                            f"💰 *Total:* R$ {resultado['valor_total']:.2f}\n"
+                            f"🗓️ *Parcelamento:* {resultado['parcelas']}x de *R$ {resultado['valor_parcela']:.2f}*\n"
+                            "\n✅ _Parcelas agendadas com sucesso no seu fluxo de caixa!_"
+                        )
                     else:
-                        texto_gasto = f"⚠️ *Atenção:*\n{msg_retorno}"
+                        texto_gasto = f"⚠️ *Atenção:*\n{resultado}"
                 else:
                     criar_transacao(
                         db=db, 
@@ -613,6 +695,70 @@ async def comando_novo_cartao(update, context):
     except Exception as e:
         await update.message.reply_text(f"❌ Erro interno: {e}")
 
+async def comando_fatura(update, context):
+    chat_id = update.effective_chat.id
+    
+    from src.database.database import SessionLocal
+    from src.database.models import Cartao, Transacao
+    from sqlalchemy import extract, func
+    from datetime import datetime
+    
+    db = SessionLocal()
+    try:
+        hoje = datetime.now()
+        mes_atual = hoje.month
+        ano_atual = hoje.year
+        
+        mes_que_vem = mes_atual + 1 if mes_atual < 12 else 1
+        ano_que_vem = ano_atual if mes_atual < 12 else ano_atual + 1
+        
+        cartoes = db.query(Cartao).filter(Cartao.chat_id == chat_id).all()
+        
+        if not cartoes:
+            await update.message.reply_text("💳 Vocês ainda não têm cartões cadastrados. Use `/novo_cartao Nome Fechamento Vencimento`", parse_mode="Markdown")
+            return
+            
+        mensagem = "💳 *RAIO-X DAS FATURAS*\n"
+        mensagem += "━━━━━━━━━━━━━━━━━━━\n\n"
+        
+        for cartao in cartoes:
+            fatura_atual = db.query(Transacao).filter(
+                Transacao.chat_id == chat_id,
+                Transacao.cartao_id == cartao.id,
+                extract('month', Transacao.data) == mes_atual,
+                extract('year', Transacao.data) == ano_atual
+            ).all()
+            
+            total_atual = sum(t.valor for t in fatura_atual)
+            
+            total_proximo = db.query(func.sum(Transacao.valor)).filter(
+                Transacao.chat_id == chat_id,
+                Transacao.cartao_id == cartao.id,
+                extract('month', Transacao.data) == mes_que_vem,
+                extract('year', Transacao.data) == ano_que_vem
+            ).scalar() or 0.0
+            
+            mensagem += f"🏦 *CARTÃO {cartao.nome.upper()}* (Vence dia {cartao.dia_vencimento:02d})\n\n"
+            
+            mensagem += f"🔴 *Fatura Atual ({mes_atual:02d}/{ano_atual})*\n"
+            mensagem += f"🎯 *Total:* R$ {total_atual:.2f}\n"
+            
+            if total_atual > 0:
+                mensagem += "📝 _Detalhes:_\n"
+                for t in fatura_atual:
+                    mensagem += f"  ├ {t.descricao.capitalize()} - R$ {t.valor:.2f}\n"
+                    
+            mensagem += f"\n🟡 *Prévia Próximo Mês ({mes_que_vem:02d}/{ano_que_vem})*\n"
+            mensagem += f"⏳ *Estimativa:* R$ {total_proximo:.2f}\n"
+            mensagem += "━━━━━━━━━━━━━━━━━━━\n\n"
+            
+        await update.message.reply_text(mensagem, parse_mode="Markdown")
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Erro ao puxar faturas: {e}")
+    finally:
+        db.close()
+
 def setup_handlers(app):
     app.add_handler(CommandHandler("menu", comando_menu))
     
@@ -628,10 +774,14 @@ def setup_handlers(app):
     app.add_handler(CommandHandler("apagar", comando_apagar))
     app.add_handler(CommandHandler("filtro", comando_filtro))
     app.add_handler(CommandHandler("novo_cartao", comando_novo_cartao))
+    app.add_handler(CommandHandler("fatura", comando_fatura))
     
     app.add_handler(CallbackQueryHandler(processar_cliques_menu, pattern="^btn_"))
     app.add_handler(CommandHandler("meta", comando_definir_meta))
     app.add_handler(CommandHandler("metas", comando_metas))
+
+    app.add_handler(CommandHandler("ajuda", comando_ajuda))
+    app.add_handler(CallbackQueryHandler(botao_ajuda_clicado, pattern='^ajuda_'))
 
     conv_handler = ConversationHandler(
         entry_points=[
