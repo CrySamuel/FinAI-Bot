@@ -12,7 +12,6 @@ import pandas as pd
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 def gerar_botoes_meses():
-    """Gera botões dinâmicos para o mês atual e os 3 anteriores"""
     hoje = date.today()
     meses_nomes = {
         1:"Janeiro", 2:"Fevereiro", 3:"Março", 4:"Abril", 
@@ -27,7 +26,6 @@ def gerar_botoes_meses():
     for _ in range(4): 
         nome_mes = meses_nomes[mes_atual]
         texto_botao = f"📅 {nome_mes}/{ano_atual}"
-        # Cria um ID invisível para o botão, ex: btn_rel_mes_04_2026
         callback = f"btn_rel_mes_{mes_atual:02d}_{ano_atual}" 
         botoes.append([InlineKeyboardButton(texto_botao, callback_data=callback)])
         
@@ -40,6 +38,19 @@ def gerar_botoes_meses():
     botoes.append([InlineKeyboardButton("🔙 Voltar", callback_data="btn_voltar")])
     
     return botoes
+
+def gerar_botoes_tipo_renda():
+    return [
+        [
+            InlineKeyboardButton("💰 Salário", callback_data="renda_tipo_Salário"),
+            InlineKeyboardButton("🏦 Adiantamento", callback_data="renda_tipo_Adiantamento")
+        ],
+        [
+            InlineKeyboardButton("🎁 Benefício", callback_data="renda_tipo_Benefício"),
+            InlineKeyboardButton("➕ Extra", callback_data="renda_tipo_Extra")
+        ],
+        [InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="renda_cancelar")]
+    ]
 
 async def comando_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
