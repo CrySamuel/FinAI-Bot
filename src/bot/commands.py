@@ -292,39 +292,44 @@ async def comando_filtro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(f"🔍 Nenhum gasto encontrado com a palavra '{termo}'.")
         
-async def comando_definir_meta(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    try:
-        categoria = context.args[0].capitalize()
-        valor = float(context.args[1].replace(',', '.'))
-        
-        db = SessionLocal()
-        meta_existente = db.query(Meta).filter(Meta.chat_id == chat_id, Meta.categoria == categoria).first()
-        
-        if meta_existente:
-            meta_existente.valor_limite = valor
-        else:
-            nova_meta = Meta(chat_id=chat_id, categoria=categoria, valor_limite=valor)
-            db.add(nova_meta)
-        
-        db.commit()
-        db.close()
-        
-        await update.message.reply_text(f"🎯 Meta de *{categoria}* definida para *R$ {valor:.2f}*!", parse_mode="Markdown")
-    except (IndexError, ValueError):
-        await update.message.reply_text("❌ Use: `/meta Categoria Valor` (Ex: `/meta Lazer 500`)", parse_mode="Markdown")
-
 async def comando_metas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    
     db = SessionLocal()
+
+    if context.args:
+        try:
+            categoria = context.args[0].capitalize()
+            valor = float(context.args[1].replace(',', '.'))
+            
+            meta_existente = db.query(Meta).filter(Meta.chat_id == chat_id, Meta.categoria == categoria).first()
+            
+            if meta_existente:
+                meta_existente.valor_limite = valor
+                resposta = f"🎯 Meta de *{categoria}* atualizada para *R$ {valor:.2f}*!"
+            else:
+                nova_meta = Meta(chat_id=chat_id, categoria=categoria, valor_limite=valor)
+                db.add(nova_meta)
+                resposta = f"🎯 Nova meta de *{categoria}* criada com limite de *R$ {valor:.2f}*!"
+            
+            db.commit()
+            await update.message.reply_text(resposta, parse_mode="Markdown")
+            
+        except (IndexError, ValueError):
+            await update.message.reply_text(
+                "❌ *Uso incorreto!*\nPara criar/editar use: `/metas Categoria Valor`\nExemplo: `/metas Lazer 500`", 
+                parse_mode="Markdown"
+            )
+        finally:
+            db.close()
+        return 
+
     try:        
         metas_cadastradas = listar_metas(db, chat_id)
         
         if not metas_cadastradas:
             await update.message.reply_text(
                 "📭 *Nenhuma meta definida ainda.*\n"
-                "Use `/meta Categoria Valor` (Ex: `/meta Lazer 100`) para começar a controlar seu orçamento!", 
+                "Use `/metas Categoria Valor` (Ex: `/metas Lazer 100`) para começar a controlar seu orçamento!", 
                 parse_mode="Markdown"
             )
             return
@@ -360,12 +365,16 @@ async def comando_metas(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 mensagem += f"💰 R$ {gasto_fmt} / R$ {limite_fmt}\n"
                 mensagem += f"↳ {status_sobra}\n\n"
 
+        mensagem += "━━━━━━━━━━━━━━━━\n"
+        mensagem += "💡 *Dica:* Use `/metas [Nome] [Valor]` para criar ou editar uma meta."
+
         await update.message.reply_text(mensagem, parse_mode="Markdown")
 
     except Exception as e:
         await update.message.reply_text(f"❌ Erro ao buscar metas: {e}")
     finally:
-        db.close()
+        if 'db' in locals():
+            db.close()
 
 async def comando_novo_cartao(update, context):
     try:

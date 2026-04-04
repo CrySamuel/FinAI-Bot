@@ -7,8 +7,7 @@ from src.bot.menu import comando_menu, processar_cliques_menu
 from src.bot.commands import (
     comando_start, comando_comandos, comando_saldo, comando_relatorio,
     comando_transacoes, comando_ultimos, comando_apagar, comando_analise,
-    comando_filtro, comando_novo_cartao, comando_fatura, comando_definir_meta,
-    comando_metas, comando_ajuda
+    comando_filtro, comando_novo_cartao, comando_fatura, comando_metas, comando_ajuda
 )
 
 from src.bot.callbacks import botao_ajuda_clicado
@@ -35,7 +34,6 @@ def setup_handlers(app):
     app.add_handler(CommandHandler("filtro", comando_filtro))
     app.add_handler(CommandHandler("novo_cartao", comando_novo_cartao))
     app.add_handler(CommandHandler("fatura", comando_fatura))
-    app.add_handler(CommandHandler("meta", comando_definir_meta))
     app.add_handler(CommandHandler("metas", comando_metas))
     app.add_handler(CommandHandler("ajuda", comando_ajuda))
 

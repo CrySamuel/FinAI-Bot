@@ -4,8 +4,11 @@ from telegram.ext import ContextTypes
 from src.database.database import SessionLocal
 from src.database.crud import (
     obter_resumo_mes,  obter_analise_categorias, 
-    listar_metas, verificar_meta_categoria, Transacao, Renda
+    listar_metas, verificar_meta_categoria, Transacao, Renda, Cartao
     )
+from src.database.models import Cartao, Transacao, Renda
+
+from sqlalchemy import extract
 from datetime import date, datetime
 import io
 import pandas as pd
@@ -53,25 +56,27 @@ def gerar_botoes_tipo_renda():
     ]
 
 async def comando_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    
     teclado = [
-            [InlineKeyboardButton("💸 Nova Renda", callback_data="renda_start"),
-            InlineKeyboardButton("📊 Saldo", callback_data="btn_saldo")], 
+        [InlineKeyboardButton("💸 Nova Renda", callback_data="renda_start"),
+         InlineKeyboardButton("📊 Saldo", callback_data="btn_saldo")], 
 
-            [InlineKeyboardButton("📋 Extrato", callback_data="btn_extrato"),
-            InlineKeyboardButton("📈 Categorias", callback_data="btn_analise")],
-            
-            [InlineKeyboardButton("🎯 Minhas Metas", callback_data="btn_metas")],
-            [InlineKeyboardButton("📁 Relatório Excel", callback_data="btn_relatorio")]
-        ]
+        [InlineKeyboardButton("📋 Extrato", callback_data="btn_extrato"),
+         InlineKeyboardButton("📈 Categorias", callback_data="btn_analise")],
+        
+        [InlineKeyboardButton("💳 Faturas", callback_data="btn_faturas"),
+         InlineKeyboardButton("⚙️ Meus Cartões", callback_data="btn_cartoes")],
+        
+        [InlineKeyboardButton("🎯 Minhas Metas", callback_data="btn_metas")],
+        [InlineKeyboardButton("📁 Relatório Excel", callback_data="btn_relatorio")]
+    ]
     
     reply_markup = InlineKeyboardMarkup(teclado)
+    texto = "🏦 *Painel de Controle FinAI*\nEscolha uma opção para gerenciar seu dinheiro:"
     
     if update.callback_query:
-        await update.callback_query.message.edit_text("Painel de Controle FinAI 🤖\nEscolha uma opção:", reply_markup=reply_markup)
+        await update.callback_query.message.edit_text(texto, reply_markup=reply_markup, parse_mode="Markdown")
     else:
-        await update.message.reply_text("Painel de Controle FinAI 🤖\nEscolha uma opção:", reply_markup=reply_markup)
-
+        await update.message.reply_text(texto, reply_markup=reply_markup, parse_mode="Markdown")
 
 async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -161,55 +166,78 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
             db.close()
 
     elif escolha == "btn_extrato":
+        texto = (
+            "📋 *Central de Extratos*\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            "Como você deseja visualizar suas movimentações?"
+        )
+        teclado = [
+            [InlineKeyboardButton("🕒 Últimas 5", callback_data="btn_ext_ultimos"),
+             InlineKeyboardButton("📜 Histórico (15)", callback_data="btn_ext_historico")],
+            [InlineKeyboardButton("🔎 Buscar Gasto Específico", callback_data="btn_ext_busca")],
+            [InlineKeyboardButton("🔙 Voltar ao Menu Principal", callback_data="btn_voltar")]
+        ]
+        await query.edit_message_text(texto, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(teclado))
+
+    elif escolha in ["btn_ext_ultimos", "btn_ext_historico"]:
+        qnt_mostrar = 5 if escolha == "btn_ext_ultimos" else 15
+        limite_db = 10 if escolha == "btn_ext_ultimos" else 30
+        
         db = SessionLocal()
         try:
-            saidas = db.query(Transacao).filter(Transacao.chat_id == chat_id).order_by(Transacao.id.desc()).limit(10).all()
-            entradas = db.query(Renda).filter(Renda.chat_id == chat_id).order_by(Renda.id.desc()).limit(5).all()
+            saidas = db.query(Transacao).filter(Transacao.chat_id == chat_id).order_by(Transacao.id.desc()).limit(limite_db).all()
+            entradas = db.query(Renda).filter(Renda.chat_id == chat_id).order_by(Renda.id.desc()).limit(limite_db).all()
             
             movimentacoes = []
             hoje = date.today()
             
             for s in saidas:
-                data_obj = s.data if s.data else datetime.combine(hoje, datetime.min.time())
-                movimentacoes.append({
-                    "tipo": "saida", "valor": s.valor, "categoria": s.categoria, 
-                    "descricao": s.descricao, "data": data_obj, "id_num": s.id
-                })
+                data_obj = s.data if getattr(s, 'data', None) else datetime.combine(hoje, datetime.min.time())
+                movimentacoes.append({"tipo": "saida", "valor": s.valor, "categoria": s.categoria, "descricao": s.descricao, "data": data_obj, "id_num": s.id})
                 
             for e in entradas:
                 try:
                     data_obj = datetime(hoje.year, hoje.month, int(e.dia_recebimento))
                 except:
                     data_obj = datetime.combine(hoje, datetime.min.time())
-                    
-                movimentacoes.append({
-                    "tipo": "entrada", "valor": e.valor, "categoria": "Receita/Renda", 
-                    "descricao": e.descricao, "data": data_obj, "id_num": e.id
-                })
+                movimentacoes.append({"tipo": "entrada", "valor": e.valor, "categoria": "Receita/Renda", "descricao": e.descricao, "data": data_obj, "id_num": e.id})
                 
             movimentacoes.sort(key=lambda x: (x["data"], 1 if x["tipo"] == "entrada" else 0, x["id_num"]), reverse=True)
-            
-            ultimas = movimentacoes[:5]
+            ultimas = movimentacoes[:qnt_mostrar]
             
             if not ultimas:
-                texto_ultimos = "🔍 Nenhuma movimentação recente encontrada."
+                texto_ultimos = "🔍 Nenhuma movimentação encontrada."
             else:
-                texto_ultimos = "🔍 *Últimas 5 Movimentações*\n━━━━━━━━━━━━━━━━\n"
+                titulo = "Últimas 5" if escolha == "btn_ext_ultimos" else "Últimas 15"
+                texto_ultimos = f"🔍 *{titulo} Movimentações*\n━━━━━━━━━━━━━━━━\n"
                 for m in ultimas:
                     icone = "🔴" if m["tipo"] == "saida" else "🟢"
                     data_formatada = m["data"].strftime("%d/%m")
                     valor_formatado = f"{m['valor']:.2f}".replace('.', ',')
-                    
                     texto_ultimos += f"{icone} *{data_formatada}* | {m['categoria']}\n"
                     texto_ultimos += f"    └ R$ {valor_formatado} ({m['descricao']})\n\n"
                     
-            teclado_voltar = [[InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="btn_voltar")]]
+            teclado_voltar = [[InlineKeyboardButton("🔙 Voltar aos Extratos", callback_data="btn_extrato")]]
             await query.edit_message_text(texto_ultimos, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(teclado_voltar))
             
         except Exception as e:
             await query.edit_message_text(f"❌ Erro ao buscar extrato: {e}")
         finally:
             db.close()
+
+    elif escolha == "btn_ext_busca":
+        texto_busca = (
+            "🔎 *Como buscar um gasto específico?*\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            "A base de dados cresce rápido! Para encontrar algo exato (ou somar gastos), saia do menu e digite no chat:\n\n"
+            "`/filtro [palavra]`\n\n"
+            "💡 *Exemplos de uso:*\n"
+            "• `/filtro ifood` (Soma e lista tudo do iFood)\n"
+            "• `/filtro gasolina` (Busca tudo de posto)\n"
+            "• `/filtro nubank` (Lista tudo desse cartão)"
+        )
+        teclado_voltar = [[InlineKeyboardButton("🔙 Voltar aos Extratos", callback_data="btn_extrato")]]
+        await query.edit_message_text(texto_busca, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(teclado_voltar))
 
     elif escolha == "btn_relatorio":
         await query.edit_message_text(
@@ -447,3 +475,65 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
             await query.edit_message_text(f"❌ Erro ao buscar metas: {e}")
         finally:
             db.close()
+
+    elif escolha == "btn_faturas":
+            db = SessionLocal()
+            try:
+                hoje = datetime.now()
+                mes_atual, ano_atual = hoje.month, hoje.year
+                prox_mes = mes_atual + 1 if mes_atual < 12 else 1
+                prox_ano = ano_atual if mes_atual < 12 else ano_atual + 1
+
+                cartoes = db.query(Cartao).filter(Cartao.chat_id == chat_id).all()
+                if not cartoes:
+                    await query.edit_message_text(
+                        "💳 *Nenhum cartão cadastrado.*\nUse `/novo_cartao Nome Fechamento Vencimento` para começar.",
+                        parse_mode="Markdown",
+                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Voltar", callback_data="btn_voltar")]])
+                    )
+                    return
+
+                texto = "💳 *RAIO-X DAS FATURAS*\n━━━━━━━━━━━━━━━━━━━\n\n"
+                for c in cartoes:
+                    fatura_atual = db.query(Transacao).filter(
+                        Transacao.chat_id == chat_id, Transacao.cartao_id == c.id,
+                        extract('month', Transacao.data) == mes_atual, extract('year', Transacao.data) == ano_atual
+                    ).all()
+                    total_atual = sum(t.valor for t in fatura_atual)
+
+                    fatura_prox = db.query(Transacao).filter(
+                        Transacao.chat_id == chat_id, Transacao.cartao_id == c.id,
+                        extract('month', Transacao.data) == prox_mes, extract('year', Transacao.data) == prox_ano
+                    ).all()
+                    total_prox = sum(t.valor for t in fatura_prox)
+
+                    texto += f"🏦 *{c.nome.upper()}* (Vence dia {c.dia_vencimento:02d})\n"
+                    texto += f"🔴 Atual: R$ {total_atual:.2f}\n"
+                    texto += f"🟡 Próxima: R$ {total_prox:.2f}\n\n"
+
+                await query.edit_message_text(texto, parse_mode="Markdown", 
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="btn_voltar")]]))
+            except Exception as e:
+                await query.edit_message_text(f"❌ Erro ao ler faturas: {e}")
+            finally:
+                db.close()
+
+    elif escolha == "btn_cartoes":
+            db = SessionLocal()
+            try:
+                cartoes = db.query(Cartao).filter(Cartao.chat_id == chat_id).all()
+                if not cartoes:
+                    texto = "📭 Nenhum cartão registrado."
+                else:
+                    texto = "⚙️ *MEUS CARTÕES CADASTRADOS*\n━━━━━━━━━━━━━━━━━━━\n\n"
+                    for c in cartoes:
+                        texto += f"💳 *{c.nome.capitalize()}*\n"
+                        texto += f"🔒 Fechamento: Dia {c.dia_fechamento}\n"
+                        texto += f"📅 Vencimento: Dia {c.dia_vencimento}\n\n"
+                
+                await query.edit_message_text(texto, parse_mode="Markdown", 
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="btn_voltar")]]))
+            except Exception as e:
+                await query.edit_message_text(f"❌ Erro ao ler cartões: {e}")
+            finally:
+                db.close()
