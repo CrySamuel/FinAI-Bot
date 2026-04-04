@@ -323,7 +323,7 @@ async def processar_cliques_menu(update: Update, context: ContextTypes.DEFAULT_T
                     tipo_cell = row[1]
                     valor_cell = row[4]
 
-                    data_cell.number_format = 'DD/MM/YYYY'
+                    data_cell.number_format = 'dd/mm/yyyy'
                     data_cell.alignment = center_alignment
                     tipo_cell.alignment = center_alignment
 
