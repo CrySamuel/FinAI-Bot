@@ -1,11 +1,10 @@
 from telegram import Update, InlineKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ContextTypes, ConversationHandler
-from datetime import datetime
-
+import re
 from src.bot.menu import gerar_botoes_tipo_renda, comando_menu 
 
 from src.database.database import SessionLocal
-from src.database.models import Renda
+from src.database.crud import criar_renda
 
 
 TIPO, VALOR, DIA = range(3)
@@ -51,32 +50,67 @@ async def receber_tipo_renda(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return VALOR
 
 async def receber_valor_renda(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texto_valor = update.message.text
     try:
-        valor = float(update.message.text.replace(",", "."))
-        context.user_data["renda_valor"] = valor
-        await update.message.reply_text("Em que dia este valor cai na conta? (Apenas o número do dia)")
+        texto_limpo = texto_valor.replace(".", "").replace(",", ".")
+        valor = float(texto_limpo)
+        
+        context.user_data['valor_renda'] = valor
+        
+        await update.message.reply_text("Entendido. E em qual dia do mês ele costuma cair na conta? (Ex: 5, 20)")
         return DIA
+        
     except ValueError:
-        await update.message.reply_text("Por favor, digite um valor numérico válido (ex: 1200.00).")
+        await update.message.reply_text("❌ Valor inválido. Digite apenas números (ex: 1500,50):")
         return VALOR
 
 async def receber_dia_renda(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        dia = int(update.message.text)
-        tipo = context.user_data["renda_tipo"]
-        valor = context.user_data["renda_valor"]
-        
-        db = SessionLocal()
-        nova_renda = Renda(tipo=tipo, valor=valor, dia=dia, data_criacao=datetime.now())
-        db.add(nova_renda)
-        db.commit()
-        db.close()
+    chat_id = update.effective_chat.id 
+    texto_dia = update.message.text
 
-        await update.message.reply_text(f"✅ Sucesso! {tipo} de R$ {valor:.2f} registado para o dia {dia}.")
-        return ConversationHandler.END
-    except ValueError:
-        await update.message.reply_text("Dia inválido. Digite apenas o número do dia.")
+    numero_encontrado = re.search(r'\d+', texto_dia)
+    
+    if numero_encontrado:
+        dia = int(numero_encontrado.group())
+
+        if 1 <= dia <= 31:
+            # LENDO AS CHAVES CORRETAS
+            tipo = context.user_data['tipo_renda']
+            valor = context.user_data['valor_renda']
+            
+            categoria_tipo = "beneficio" if tipo in ["Benefício", "VR", "VA"] else "dinheiro"
+            
+            try:
+                db = SessionLocal()
+                criar_renda(db, descricao=tipo, valor=valor, dia_recebimento=dia, chat_id=chat_id, tipo=categoria_tipo)
+                db.close()
+                
+                valor_formatado = f"{valor:.2f}".replace('.', ',')
+                
+                await update.message.reply_text(
+                    f"✅ *Renda salva com sucesso!*\n"
+                    f"━━━━━━━━━━━━━━━━━━━\n"
+                    f"🏷️ Tipo: {tipo}\n"
+                    f"💰 Valor: R$ {valor_formatado}\n"
+                    f"📅 Dia de recebimento: {dia}",
+                    parse_mode="Markdown"
+                )
+                return ConversationHandler.END
+            except Exception as e:
+                await update.message.reply_text(f"❌ Erro ao salvar no banco: {e}")
+                return ConversationHandler.END
+                
+        else:
+            await update.message.reply_text("❌ Dia inválido. Por favor, digite um dia entre 1 e 31:")
+            return DIA
+            
+    else:
+        await update.message.reply_text("❌ Não encontrei nenhum número. Digite o dia do recebimento (ex: 5, dia 20):")
         return DIA
+
+async def cancelar_conversa(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("❌ Cadastro de renda cancelado.")
+    return ConversationHandler.END
 
 async def cancelar_conversa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Registo cancelado.", reply_markup=ReplyKeyboardRemove())
