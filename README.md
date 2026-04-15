@@ -75,7 +75,7 @@ Atualização via git pull.
 Execução contínua em segundo plano gerenciada via tmux.
 
 ## 👨‍💻 Autor
-Crys
+Crystofer Samuel Demetino Dos Santos
 
 Desenvolvedor Backend & Entusiasta de Inteligência Artificial
 
