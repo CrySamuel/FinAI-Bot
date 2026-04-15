@@ -31,17 +31,6 @@ Este projeto foi desenhado com uma **Arquitetura Multitenant**, permitindo que m
 
 ---
 
-## 📸 Demonstração do Projeto
-
-<img width="742" height="529" alt="Captura de tela 2026-03-25 142955" src="https://github.com/user-attachments/assets/3394e4ce-3416-4cf8-94a6-8ca9aa9b6975" />
-<img width="817" height="689" alt="Captura de tela 2026-03-25 143006" src="https://github.com/user-attachments/assets/7fceb4e1-9059-4651-a199-3cbce1e264cf" />
-<img width="812" height="725" alt="Captura de tela 2026-03-25 143019" src="https://github.com/user-attachments/assets/a301d379-54ac-4c3e-88aa-8ee7def85798" />
-<img width="799" height="624" alt="Captura de tela 2026-03-25 143030" src="https://github.com/user-attachments/assets/58f756f0-6ec7-4ec6-909d-0cf36f34a099" />
-<img width="846" height="774" alt="Captura de tela 2026-03-25 143041" src="https://github.com/user-attachments/assets/a1ae31e5-c54c-433b-809b-06476715d264" />
-<img width="763" height="389" alt="Captura de tela 2026-03-25 143137" src="https://github.com/user-attachments/assets/eef72b74-337a-4b42-82ce-fa5a308fa0a8" />
-
----
-
 ## 🚀 Como rodar o projeto localmente
 
 Se você quiser testar ou contribuir com o FinAI, siga os passos abaixo:
